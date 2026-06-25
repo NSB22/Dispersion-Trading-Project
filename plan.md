@@ -9,10 +9,11 @@
 **Objectif :** infrastructure prête + dataset propre point-in-time. C'est la semaine la plus critique.
 
 ### Setup
-- [ ] Connexion WRDS opérationnelle (`wrds.Connection()`) — relancer l'admin si toujours "under review"
+- [⏳] Connexion WRDS opérationnelle (`wrds.Connection()`) — compte "under review", en attente de validation
 - [ ] Vérifier l'accès à `optionm.vsurfd` et aux tables CRSP de constituents
-- [ ] Repo GitHub + environnement (`requirements.txt` : wrds, pandas, numpy, scipy, scikit-learn, statsmodels)
-- [ ] Figer les **paramètres de design** : N composants (30 conseillé pour aller vite), maturité 91j, delta 50 (ATM), période de backtest (2018-2024 suffit), rebalancement trimestriel
+- [✅] Repo GitHub + environnement (uv + pyproject.toml : wrds, pandas, numpy, scipy, scikit-learn, statsmodels)
+- [✅] Plomberie de connexion WRDS écrite (`src/dispersion/data/wrds_client.py` + `.env`)
+- [ ] Figer les **paramètres de design** : reporté volontairement — sera décidé APRÈS exploration des données réelles
 
 ### Données
 - [ ] CRSP : constituents S&P 500 par rebalancement (memberships + poids) → fonction `get_universe(date)`
