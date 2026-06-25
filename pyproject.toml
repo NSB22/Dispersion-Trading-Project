@@ -1,0 +1,45 @@
+[project]
+name = "dispersion-trading"
+version = "0.1.0"
+description = "ML-Driven Dispersion Trading Strategy — Imperial College Applied Project"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # --- Data access ---
+    "wrds>=3.3.0",
+    "pyarrow>=16.0.0",        # pour les .parquet
+    # --- Core scientific stack ---
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "scipy>=1.13",
+    # --- Stats & ML (baseline + RMT) ---
+    "scikit-learn>=1.5",
+    "statsmodels>=0.14",
+    # --- Viz ---
+    "matplotlib>=3.9",
+    "seaborn>=0.13",
+    # --- Notebooks ---
+    "jupyterlab>=4.2",
+    "ipykernel>=6.29",
+    # --- Utils ---
+    "python-dotenv>=1.0",     # pour gérer les credentials WRDS proprement
+    "tqdm>=4.66",             # barres de progression
+]
+
+[project.optional-dependencies]
+ml = [
+    "xgboost>=2.1",
+    "torch>=2.3",             # pour LSTM (phase 5, optionnelle)
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "black>=24.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.black]
+line-length = 100

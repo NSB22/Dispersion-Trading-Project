@@ -1,0 +1,27 @@
+# Environnements
+.venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Secrets & credentials WRDS
+.env
+.pgpass
+*.pgpass
+
+# Données (sous licence WRDS — JAMAIS sur git)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Résultats générés
+results/figures/*
+results/tables/*
+!results/figures/.gitkeep
+!results/tables/.gitkeep
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
