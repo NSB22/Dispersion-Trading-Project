@@ -9,16 +9,17 @@
 **Objectif :** infrastructure prête + dataset propre point-in-time. C'est la semaine la plus critique.
 
 ### Setup
-- [⏳] Connexion WRDS opérationnelle (`wrds.Connection()`) — compte "under review", en attente de validation
-- [ ] Vérifier l'accès à `optionm.vsurfd` et aux tables CRSP de constituents
+- [✅] Connexion WRDS opérationnelle (`wrds.Connection()`) — compte validé, `.pgpass` créé, accès `crsp`/`optionm`/`comp` confirmé
+- [✅] `optionm.vsurfd` exploré (notebook 01) : tables annuelles 1996→2025, colonnes connues, 91j/delta±50 natifs, SPX = secid 108105
+- [✅] CRSP exploré (notebook 02) : membership `crsp.dsp500list` (1925→2024), réalisé `crsp.dsf` (prc/ret/shrout), jointure `secid↔permno` = `wrdsapps_link_crsp_optionm.opcrsphist`. Produit moderne `idx_const_*_v2` = accès refusé → approche legacy retenue.
 - [✅] Repo GitHub + environnement (uv + pyproject.toml : wrds, pandas, numpy, scipy, scikit-learn, statsmodels)
 - [✅] Plomberie de connexion WRDS écrite (`src/dispersion/data/wrds_client.py` + `.env`)
-- [ ] Figer les **paramètres de design** : reporté volontairement — sera décidé APRÈS exploration des données réelles
+- [✅] **Paramètres de design figés** : N=100 (top capi, rotation ~4/trimestre, couverture 63–70%), maturité 91j, delta ±50, rebalancement trimestriel. SPX = secid 108105.
 
 ### Données
-- [ ] CRSP : constituents S&P 500 par rebalancement (memberships + poids) → fonction `get_universe(date)`
-- [ ] OptionMetrics `vsurfd` : IV pour SPX + composants, maturité 91j, delta 50
-- [ ] Jointures d'identifiants : `secid` ↔ `permno` ↔ ticker
+- [✅] CRSP : `get_universe(db, date, n=100)` → `src/dispersion/data/universe.py` — testé sur 2010/2015/2020, 0 secid manquant
+- [ ] OptionMetrics `vsurfd` : IV pour SPX + composants, maturité 91j, delta ±50 → `get_iv()`
+- [✅] Jointures d'identifiants : `secid` ↔ `permno` via `opcrsphist` score=1, intégré dans `get_universe`
 - [ ] CRSP `dsf` : prix ajustés → rendements → vol réalisée glissante (21j, 63j) + corrélation réalisée
 - [ ] Nettoyage : trous, outliers IV, alignement des calendriers
 

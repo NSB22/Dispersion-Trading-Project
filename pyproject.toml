@@ -23,7 +23,14 @@ dependencies = [
     # --- Utils ---
     "python-dotenv>=1.0",     # pour gérer les credentials WRDS proprement
     "tqdm>=4.66",             # barres de progression
+    "six>=1.17.0",
 ]
+
+# NB : pas de [build-system] volontairement. Le projet vit sous ~/Desktop (TCC macOS),
+# où l'editable-install uv (.pth) est cassé par le xattr com.apple.provenance lu au
+# démarrage par site/io.open_code. `dispersion` est rendu importable via PYTHONPATH (.env).
+[tool.uv]
+package = false
 
 [project.optional-dependencies]
 ml = [
