@@ -56,6 +56,15 @@ def get_universe(db: wrds.Connection, date: str, n: int = 100) -> pd.DataFrame:
     ),
     top_n AS (
         SELECT * FROM ranked WHERE rnk <= {n}
+    ),
+    link AS (
+        -- score=1 only (CUSIP+ticker+date match). A permno can have several valid
+        -- score-1 links with overlapping windows -> keep one (latest edate) to
+        -- guarantee a unique secid per permno.
+        SELECT DISTINCT ON (permno) permno, secid
+        FROM wrdsapps_link_crsp_optionm.opcrsphist
+        WHERE score = 1 AND sdate <= '{date}' AND edate >= '{date}'
+        ORDER BY permno, edate DESC
     )
     SELECT t.permno,
            l.secid,
@@ -63,12 +72,7 @@ def get_universe(db: wrds.Connection, date: str, n: int = 100) -> pd.DataFrame:
            t.market_cap / SUM(t.market_cap) OVER () AS weight,
            t.rnk
     FROM top_n t
-    -- score=1 only: CUSIP+ticker+date match, no ambiguity
-    LEFT JOIN wrdsapps_link_crsp_optionm.opcrsphist l
-      ON t.permno = l.permno
-     AND l.score = 1
-     AND l.sdate <= '{date}'
-     AND l.edate >= '{date}'
+    LEFT JOIN link l ON t.permno = l.permno
     ORDER BY t.rnk
     """
     return db.raw_sql(query)
