@@ -4,7 +4,7 @@
 
 ---
 
-## SEMAINE 1 (25 juin → 2 juil) — Setup, Données & Univers
+## SEMAINE 1 (29 juin → 5 juil) — Setup, Données & Univers
 
 **Objectif :** infrastructure prête + dataset propre point-in-time. C'est la semaine la plus critique.
 
@@ -32,63 +32,82 @@
 
 ---
 
-## SEMAINE 2 (3 juil → 9 juil) — Théorie & Signal
+## SEMAINE 2 (6 juil → 12 juil) — Théorie & Signal
 
 **Objectif :** la mécanique du signal + sa justification théorique.
 
-### Dérivation mathématique
-- [ ] P&L du portefeuille de dispersion via Lemme d'Itô
-- [ ] Décomposition en pari corrélation réalisée vs implicite
-- [ ] Formalisation du Volatility Risk Premium + Correlation Risk Premium
+### Dérivation mathématique — ✅ acquise via lecture complète DMV (2009), 8 juil.
+- [✅] P&L du portefeuille de dispersion via Lemme d'Itô — éq. (8)–(11) redérivées : hedge triangulaire (vega d'abord, la vol-de-vol se simplifie dans le ratio de vegas relatifs ; delta résiduel avec l'indice seul). Rédaction pour le rapport en S5.
+- [✅] Décomposition en pari corrélation réalisée vs implicite — éq. (2)–(3), identification par VRP_indiv ≈ 0 (98/127 titres)
+- [✅] Formalisation VRP + CRP — éq. (3) via Itô/Girsanov (convexités s'annulent en ℚ−ℙ) ; MFIV éq. (4)–(5) Carr–Madan comprise
 
-### Corrélation implicite
-- [ ] Formule d'inversion : IV indice + composants + poids → ρ_implied
-- [ ] ρ_realized depuis la covariance réalisée
-- [ ] Série temporelle du **spread** (ρ_implied − ρ_realized) = signal brut
-- [ ] Vérification : ρ_implied borné dans [0,1]
+### Forks méthodologiques tranchés (8 juil., README §5 + §8)
+- [✅] **Variance implicite = ATM 91j** (instrument-consistency : on trade des straddles ATM ; biais conservateur : le skew indice fait sous-estimer ρ_implied) ; MFIV = robustesse S5 si temps
+- [✅] **Window-matching = deux séries** : trailing (signal ex-ante, S3) + forward = trailing décalé de +63 j ouvrés (validation de la prime à la DMV) ; caveat poids inter-trimestre documenté
+- [✅] **Micro-choix d'implémentation (8 juil., vérifiés sur données)** : IV manquante → renormalisation quotidienne des poids sur titres disponibles + plancher 90/100 (« supprimer les jours » aurait détruit 54,9 % de l'échantillon ; poids manquant médian 1,3 %) ; ρ_implied stocké **brut** + compteurs de violations ; livrable `signal.parquet` ; `secid` → Int64 (README §5.1)
 
-**Livrable :** série du dispersion spread + graphe montrant l'implicite en moyenne au-dessus du réalisé (validation empirique de la thèse).
+### Corrélation implicite (implémentation)
+- [✅] Formule d'inversion implémentée + validée (notebook 03, 8 juil.) — reste : promotion `src/dispersion/signal/implied_corr.py` + écriture `signal.parquet`
+- [✅] ρ_realized depuis la covariance réalisée (fait en S1 : ρ̄ pondérée quotidienne, option B — même forme fonctionnelle que l'inversion ⟹ spread pomme-à-pomme)
+- [✅] Séries **premium** et **signal** calculées : Π̄ = **+0.079 (t-NW63 = 7.4, 75 % j > 0)**, S̄ = +0.078 (t = 10.6, 80 % j > 0) → **thèse CRP validée sur 1996–2024**
+- [✅] Vérification bornes : ρ_implied ∈ [0.12, 0.91] — **0 violation, 0 NaN** sur 7221 j ; couverture min 91/100 (plancher jamais atteint)
+- [✅] Aperçu sous-périodes : 2008–12 = 0.135 (t=4.3) ; **2020–24 = 0.028 (t=1.19, non significatif)** → compression récente de la prime, à creuser en S5 (limits-to-arbitrage)
+- [✅] Promotion : `src/dispersion/signal/implied_corr.py` (`implied_correlation` + `build_signal`) + `signal.parquet` écrit (7221 j × 7 col.) — reproduit le notebook à l'identique. **SEMAINE 2 TERMINÉE** (rédaction des dérivations → S5).
 
-**Piège :** approximation one-factor (corrélation moyenne unique) — à assumer et documenter.
+**Livrable :** ✅ `signal.parquet` + graphe de validation `results/fig_crp_validation.png` (implicite au-dessus du réalisé forward, premium window-matché).
+
+**Piège :** approximation one-factor (corrélation moyenne unique) — à assumer et documenter (DMV éq. 6 fait la même hypothèse).
 
 ---
 
-## SEMAINE 3 (10 juil → 16 juil) — Stratégie Baseline
+## SEMAINE 3 (13 juil → 19 juil) — Stratégie Baseline
 
 **Objectif :** un backtest qui tourne, sans ML = benchmark de référence.
 
 ### Moteur
 - [ ] Classe `DispersionEngine` (ouverture/fermeture, suivi P&L)
 - [ ] Portefeuille : long straddles composants, short straddle indice
-- [ ] Greeks 1er ordre (Delta, Vega) ; Vega-neutre à l'entrée, Delta-neutre en rééquilibrage quotidien
+- [ ] **v0 inconditionnel D'ABORD** (trade systématique à chaque rebal. — seul comparable aux benchmarks DMV Table II), puis v1 conditionné au seuil de signal — sépare « la prime existe » de « on sait la timer »
+- [ ] Greeks 1er ordre (Delta, Vega) ; Vega-neutre à l'entrée, Delta-neutre en rééquilibrage quotidien — hedge triangulaire DMV éq. (10)–(11) : vega d'abord, delta résiduel avec l'indice
+- [ ] Grecques **relatives** (vega/prix, par dollar investi) — conversions brut↔relatif dans `utils` + **test unitaire** sur cas BS en forme fermée (piège : mélange de conventions = hedge silencieusement faux)
+- [ ] ⏸ Fork en suspens : source des primes/grecques — `impl_premium` (vsurfd, interpolation entre maturités pour marquer les positions vieillissantes) vs recalcul Black–Scholes (+ `zerocd`, dividendes). À trancher après exploration de la surface.
 
 ### Règles & réalisme
-- [ ] Règle d'entrée (seuil de spread), sortie/roll, gestion du roll à l'échéance
-- [ ] Coûts de transaction (bid-ask options), dividendes, slippage
+- [ ] Règle d'entrée (seuil de spread) pour v1, sortie/roll, gestion du roll à l'échéance
+- [ ] Coûts de transaction — leçon DMV Table V : **1er ordre** (rendement ÷2, alpha mort). Convention : bid-to-maturity (jambes vendues) / ask-to-maturity (jambes achetées), spread payé une fois.
+- [ ] ⏸ Fork en suspens : vrais bid/ask `opprcd` (lourd, matching 91j↔contrats listés) vs spread paramétrique calibré sur échantillon `opprcd` + sensibilité
 
 ### Métriques
 - [ ] Sharpe, Sortino, Max Drawdown, P&L cumulé
 - [ ] Décomposition du P&L par source (vega, gamma, theta, correlation)
+- [ ] **Sanity vs benchmarks DMV** (README §8bis) : poids ~−100/+101/−32,5, ratio 0,58, Sharpe ~0,73 brut / 0,41 net, β≈0 — écart massif = chasse au bug avant interprétation
+- [ ] Stats : **Newey–West (~63 lags)** sur toute série chevauchante
 
-**Livrable :** courbe de P&L cumulé baseline + tableau de métriques. **C'est le cœur notable du projet.**
+**Livrable :** courbe de P&L cumulé v0 (benchmark DMV) + v1 (signal) + tableau de métriques. **C'est le cœur notable du projet.**
 
 **Piège :** Delta-neutre ne suffit pas → surveiller le Vega-convexity (Volga).
 
 ---
 
-## SEMAINE 4 (17 juil → 23 juil) — Random Matrix Theory (+ ML léger si le temps le permet)
+## SEMAINE 4 (20 juil → 26 juil) — Random Matrix Theory (+ ML léger si le temps le permet)
 
 **Objectif :** la couche de valeur ajoutée quantitative.
 
-### RMT (prioritaire)
-- [ ] Matrice de corrélation réalisée N×N + spectre de valeurs propres
-- [ ] Superposer la densité de Marchenko-Pastur (bulk de bruit vs signal)
-- [ ] Eigenvalue clipping → matrice "propre"
-- [ ] Réinjecter dans le spread/les poids, re-backtester, comparer baseline vs RMT
+### RMT (prioritaire) — spec figée le 8 juil. (README §8bis), module `src/dispersion/rmt/`
+- [ ] ⏸ Fork en suspens : ajouter `returns.parquet` au build (long : date, permno, ret — requis pour matrices 252j + features spectrales) ; schéma exact à trancher en début de S4
+- [ ] Matrices de corrélation **252j** (q=N/T≈0,4 sain — les 63j stockées sont singulières, q≈1,6, spectre dégénéré) + spectre de valeurs propres
+- [ ] Superposer Marchenko–Pastur ; λ₊ **effectif** avec correction Laloux : (1−λ₁/N)(1+√q)²
+- [ ] Pipeline : dévolatilisation EWMA + standardisation → diagonalisation → clipping du bulk en λ̄ (**trace préservée**) → renormalisation (diag=1, PSD garantie)
+- [ ] Tests unitaires : diag=1, PSD, trace + **test iid simulé** (histogramme ≈ densité MP ; filtre ≈ identité)
+- [ ] Rôle A : ρ̄_realized débruitée → réinjecter dans le spread, re-backtester vs baseline
+- [ ] Explorer la **jambe parcimonieuse** (structure spectrale → moins de noms → moins de spread payé = réponse RMT aux frictions DMV)
+- [ ] Justifier les **deux fenêtres** dans le rapport (63j = window-matching de l'horizon pricé ; 252j = santé du spectre)
+- [ ] Réfs : Bun–Bouchaud–Potters 2017 (arXiv 1610.08104), Potters–Bouchaud 2020
 
 ### ML (bonus, seulement si la RMT est bouclée)
-- [ ] XGBoost : prédire le spread à H jours + feature importance (VIX, vol réalisée, lags)
-- [ ] Validation walk-forward avec purging/embargo (anti data-leakage)
+- [ ] Features **spectrales** (rôle B de la RMT) : λ₁/N, absorption ratio, K (nb λ > λ₊), Δλ₁, rotation du vecteur propre dominant + VIX, vol réalisée, lags
+- [ ] Cible : régimes de **spike de corrélation** → couper le short-corr (objectif : skew/drawdown, pas le rendement moyen = « n'entrer que si edge prédit > coût »)
+- [ ] XGBoost + validation walk-forward avec purging/embargo (anti data-leakage)
 - [ ] (Si vraiment du temps) K-Means pour régimes calme/stress/crise
 
 **Livrable :** graphe du spectre + tableau comparatif baseline vs RMT (et vs ML si fait).
@@ -97,13 +116,17 @@
 
 ---
 
-## SEMAINE 5 (24 juil → 31 juil) — Analyse, Robustesse & Rédaction
+## SEMAINE 5 (27 juil → 2 août) — Analyse, Robustesse & Rédaction
 
 **Objectif :** transformer le code en rapport académique de 3000 mots.
 
 - [ ] Stress-tests (COVID 2020, taux 2022) + sensibilité aux paramètres
+- [ ] **Sous-périodes** : la prime s'est-elle comprimée post-2003 ? (prédiction falsifiable du framework limits-to-arbitrage — notre valeur ajoutée vs DMV : 29 ans vs leur échantillon arrêté début 2000s)
+- [ ] Stats finales : **Newey–West (~63 lags)** partout où les fenêtres se chevauchent + tests non-chevauchants (trimestriels) en robustesse
 - [ ] Analyse Vanna/Volga (au moins qualitative) + risque de convexité
+- [ ] (Si temps) Robustesse MFIV : reconstruction Carr–Madan sur la jambe indice pour borner le biais de skew de l'ATM (README §5)
 - [ ] Rédaction : Intro/Client Spec → Théorie → Données & Méthodo → Résultats → Limites → Conclusion
+- [ ] **Narratif** : la prime existe (DMV + nos 29 ans) → les frictions la tuent (Tables V–VI) → RMT (jambe parcimonieuse) + ML (edge prédit > coût) = réponses aux frictions
 - [ ] Soigner les figures + intégrer la reading list
 - [ ] Nettoyer et documenter le repo
 

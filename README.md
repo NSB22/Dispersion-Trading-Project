@@ -197,11 +197,53 @@ Solving for the average correlation and feeding **implied** vols gives the impli
 $$\boxed{\;\rho_{\text{implied}} \;=\; \frac{\sigma_I^2 - \sum_i w_i^2\sigma_i^2}{\sum_{i\neq j} w_i w_j \sigma_i\sigma_j} \;=\; \frac{\sigma_I^2 - \sum_i w_i^2\sigma_i^2}{\left(\sum_i w_i\sigma_i\right)^2 - \sum_i w_i^2\sigma_i^2}\;}$$
 
 where $\sigma_I$ = SPX implied vol (secid 108105), $\sigma_i$ = constituent $i$ implied vol, $w_i$ =
-weights. (This is the CBOE-style implied-correlation construction.)
+weights. (This is the CBOE-style implied-correlation construction; DMV 2009, eq. 2.)
+
+**Vol inputs — decided (Week 2, after full DMV reading): ATM 91-day IVs, not MFIV.** DMV build
+implied correlation from **model-free implied variance** (Carr–Madan:
+$\sigma^2_{MF} = 2\int \frac{C(K)-\max(S_0-K,0)}{K^2}\,dK$), which integrates the whole smile. We feed
+**ATM ($\pm50\Delta$) 91-day IVs** instead, for three reasons:
+
+1. **Instrument consistency** — the strategy trades ATM straddles (§7): the correlation premium
+   measured in ATM-vol space is exactly the one the book can monetise. An MFIV-based measure partly
+   reflects wings we do not trade.
+2. **Conservative bias** — the index smile is much steeper than single-name smiles, so ATM understates
+   index implied variance *more* than component variance $\Rightarrow \rho_{\text{implied}}$ is
+   **understated**. If implied > realised holds in ATM space, it holds a fortiori in MFIV space.
+3. **Cost** — MFIV needs the full surface (~17 deltas × 2 sides × 100 names × 29 years), delta→strike
+   conversion, tail extrapolation, numerical integration. Kept as a **Week-5 robustness extension**
+   (e.g. index-leg-only reconstruction) if time permits.
+
+**Bounds.** From the boxed formula: $\rho_{\text{implied}} \le 1 \iff \sigma_I \le \sum_i w_i\sigma_i$
+(index IV below the weighted-average component IV — diversification), consistent with the QA finding
+that component IV exceeds index IV on every one of the 7221 days; and
+$\rho_{\text{implied}} \ge 0 \iff \sigma_I^2 \ge \sum_i w_i^2\sigma_i^2$, essentially always true (the
+concentration term $\sum_i w_i^2$ is tiny for $N=100$). Both checks are run and violation counts
+reported rather than clipped.
+
+**Index–basket basis (documented).** The numerator uses SPX IV (the full 500-name index) while the
+sums run over our top-100 basket — the measure embeds an index-vs-basket basis. This is the *same*
+basis the strategy itself trades (short SPX straddle vs a 100-name basket, §3.4), so the signal
+remains book-consistent.
 
 **Documented limitation:** the one-factor (single $\bar\rho$) assumption collapses the full pairwise
-correlation structure into one number — assumed and stated explicitly. The RMT layer (§8) revisits
-the full matrix. Validity check to apply: $\rho_{\text{implied}} \in [0,1]$.
+correlation structure into one number — assumed and stated explicitly (DMV eq. 6 makes the same
+equicorrelation-factor assumption). The RMT layer (§8bis) revisits the full matrix.
+
+### 5.1 Implementation choices (decided 8 Jul 2026 — data-verified)
+
+- **Missing component IV on a day → renormalise the weights over the available names** that day (the
+  exact analogue of the listwise choice on the realised side, §6.3), with an `n_names` coverage column
+  and a **coverage floor**: the day is invalidated below 90/100 names (a free guard — observed minimum
+  is 91). *The data check that settled it:* a strict "drop any day with a missing name" rule would
+  delete **54.9% of days** (3,962/7,221 — ~3 names lack a score-1 secid link for entire quarters, so
+  those quarters never reach 100/100), while the missing weight on affected days is only **1.3%
+  (median) / 7.2% (max)** of the basket. Renormalisation is innocuous; dropping is destructive.
+- **Bound violations stored raw** — no clipping. Violation counts are reported as diagnostics;
+  clipping (if ever) is a strategy-layer decision, not a data-layer one.
+- **Deliverable:** `signal.parquet` — `date, rho_implied, rho_trailing, rho_forward, premium, signal,
+  n_names` (notebook 03 exploration → promoted to `src/dispersion/signal/`).
+- `secid` normalised to `Int64` on load (Week-1 cosmetic leftover).
 
 ---
 
@@ -270,8 +312,10 @@ spikes in stress, as expected.
 
 **Rank deficiency — a feature, not a bug.** With $T=63 < N=100$, the matrix is PSD but **singular**
 (rank $\le T-1=62$, so ~38 zero eigenvalues). One eigenvalue dominates (~75% of total variance) — the
-**market factor**. This $q=T/N\approx0.63<1$ regime (Marchenko–Pastur has a point mass at zero) is
-exactly where eigenvalue clipping (§8) adds value, confirming the $N=100$ choice.
+**market factor**. In the Marchenko–Pastur convention $q=N/T\approx1.6>1$ ($T<N \Rightarrow$ point
+mass at zero): the 63-day spectrum is **degenerate**, so spectral filtering cannot run on it. The RMT
+layer therefore operates on **252-day** windows ($q\approx0.4$, §8bis); the 63-day object is kept only
+for the window-matched scalar $\bar\rho$ (two windows, two uses — see §8bis).
 
 ---
 
@@ -304,9 +348,11 @@ carry a trailing buffer so the 63-day windows are warm.
 | `realized_vol` | `date, permno, vol_21, vol_63` | daily × constituent |
 | `realized_corr` | `date, rho_bar, rho_bar_equal` | daily |
 | `corr_matrices` | `rebalance_date, permno_i, permno_j, corr` | per rebalance |
+| `signal` | `date, rho_implied, rho_trailing, rho_forward, premium, signal, n_names` | daily (Week 2) |
 
 The dataset is fully reproducible from `data/raw` (here, directly from WRDS) by re-running
-`build_dataset`.
+`build_dataset`; `signal.parquet` is rebuilt from the six base files by
+`dispersion.signal.implied_corr.build_signal` (§5, §8).
 
 ## 7. Trade mechanics
 
@@ -339,17 +385,119 @@ straddles. Reasons:
 
 ---
 
-## 8. The dispersion signal
+## 8. The dispersion signal — two window-matched objects
 
-The raw signal is the **dispersion spread**
+**Decided (Week 2, after DMV):** the IV at $t$ prices the window $[t,\,t+63\text{ trading days}]$
+(≈ 91 calendar days), while our stored realised correlation at $t$ is **trailing** (past 63 days).
+Comparing them mixes two windows, so we build **two distinct objects, one per use**:
 
-$$S_t \;=\; \rho_{\text{implied},t} \;-\; \rho_{\text{realised},t},$$
+**The premium (ex-post, validation).** Compare the price paid at $t$ with what *then* realised over
+the exact window that price covered:
 
-expected to be **positive on average** (the CRP). Entry/exit rules threshold $S_t$ (Week 3). The
-**RMT layer** (Week 4) cleans the realised correlation matrix — superimposing the Marchenko–Pastur
-density to separate the noise bulk from genuine signal eigenvalues, eigenvalue-clipping, then
-re-injecting the cleaned matrix and re-backtesting vs the baseline. An optional **ML layer** (Week 4,
-bonus) predicts the spread (walk-forward, purging/embargo to avoid leakage).
+$$\Pi_t \;=\; \rho_{\text{implied},t} \;-\; \rho^{\text{fwd}}_{\text{realised},t},
+\qquad
+\rho^{\text{fwd}}_{\text{realised},t} \;=\; \rho^{\text{trail}}_{\text{realised},\,t+63\text{td}}$$
+
+— the forward series is the trailing series shifted **back by 63 trading days** (no new computation).
+$E[\Pi_t]>0$ over the sample = the CRP exists. This is DMV's **window-matching**. It uses future
+information relative to $t$: legitimate for ex-post analysis (validation chart, report), **never** as
+a trading input. *Documented caveat: the trailing value at $t+63$ uses weights frozen at the rebalance
+covering $t+63$, which can differ from those at $t$ across a quarter boundary — second-order for
+validation purposes.*
+
+**The signal (ex-ante, tradeable).**
+
+$$S_t \;=\; \rho_{\text{implied},t} \;-\; \rho^{\text{trail}}_{\text{realised},t}$$
+
+uses only information available at $t$. The two are linked by the decomposition
+
+$$S_t \;=\; \Pi_t \;+\; \big(\rho^{\text{fwd}}_t - \rho^{\text{trail}}_t\big),$$
+
+i.e. the signal = the premium + the trailing-forecast error. Correlation persistence makes $S_t$ an
+**ex-ante estimator of the premium** — the standard premium/proxy structure of any harvesting strategy.
+
+**Strategy design implication.** DMV's dispersion strategy is **unconditional** (no signal — short
+correlation every period). Thresholding $S_t$ (Week 3) and ML timing (Week 4) are *our extensions*.
+The backtest therefore runs the **unconditional baseline v0 first** (comparable to DMV's Table II
+benchmarks, §8bis), then the signal-conditioned v1 — separating "the premium exists" from "we can
+time it".
+
+---
+
+## 8bis. DMV (2009) — benchmarks and conventions adopted (full reading, Week 2)
+
+Driessen, Maenhout & Vilkov (2009), *The Price of Correlation Risk: Evidence from Equity Options*,
+read in full with all core derivations reworked: eq. (2) index-variance decomposition; eq. (3) index
+VRP = weighted individual VRPs + correlation terms (Itô + Girsanov, convexities cancel in
+$\mathbb{Q}-\mathbb{P}$), identification via VRP$_{\text{indiv}} \approx 0$ empirically; eq. (4)–(5)
+MFIV (Carr–Madan); eq. (6) equicorrelation factor structure; eq. (8)–(11) straddle returns and the
+**triangular hedge** (vega first — the vol-of-vol cancels in the relative-vega ratio — then residual
+delta with the index alone).
+
+### Benchmarks (sanity guards for the Week-3 backtest)
+
+Orders of magnitude, **not** replication targets (their sample, 1-month horizon and universe differ):
+
+| Quantity | DMV value |
+|---|---|
+| Index $\sqrt{RV}$ / $\sqrt{MFIV}$ | 20.80% / 24.69% (implied ≫ realised) |
+| Single-name $\sqrt{RV}$ / $\sqrt{MFIV}$ | 41.44% / 38.97% (**sign flips**) |
+| Strategy weights | −100% index straddle / +101.12% single-name straddles / −32.54% index (delta) / +131.42% riskless |
+| Straddle ratio | 0.58 single-name straddle per index straddle |
+| Gross performance | 10.37%/mo, Sharpe 0.73, skew −0.28, α=10.59%/mo (t=1.96), **β=0.028 (t=0.02)** |
+| Net of bid-ask (Table V) | return ÷ 2, Sharpe 0.41, α dead (t=0.77); CBOE margins without netting → infeasible for γ≤2 |
+| Correlation premium (Table IV) | λ_corr = 17.5%/mo (t=2.56, Shanken), R²=89%; β_corr: index −0.96 vs individual −0.24 |
+
+**Rule:** after the unconditional baseline v0, compare — a large deviation triggers a bug hunt before
+any interpretation.
+
+### Conventions adopted
+
+1. **Window-matching** (§8): the premium uses realised correlation measured *forward* over the IV
+   horizon.
+2. **Costs at the adverse quote**: bid-to-maturity for short legs, ask-to-maturity for long legs;
+   spread paid once (held to maturity). Cost realism is **first-order** — DMV Table V halves returns.
+3. **Newey–West (~63 lags)** for every t-stat on overlapping daily windows; non-overlapping
+   (quarterly) tests as robustness.
+4. Moneyness in **BS deltas**, not strike/spot (already our extraction grid ✓).
+5. **Historical index composition** at each date (already point-in-time ✓).
+6. Hedge-ratio greeks are **relative** (per dollar invested: vega/option-price). OptionMetrics/BS give
+   per-contract greeks → conversion utilities + **unit test** on a closed-form BS case (Week 3). Mixing
+   conventions produces a silently wrong hedge.
+
+### Open forks (deliberately pending — they depend on future exploration)
+
+- **Week 3 — premiums/greeks source:** re-extract `impl_premium`/`impl_strike` from `vsurfd`
+  (interpolation across surface maturities needed to mark ageing positions) **vs** recompute
+  Black–Scholes from stored IV (needs `optionm.zerocd` risk-free + dividend treatment). Decide after
+  inspecting the surface columns.
+- **Week 3 — transaction costs:** real spreads from `optionm.opprcd` (huge table, non-trivial matching
+  of 91-day standardised options to listed contracts) **vs** parametric spreads calibrated on an
+  `opprcd` sample (+ sensitivity analysis).
+- **Week 4 — `returns.parquet`:** add a stored daily-returns panel (long: `date, permno, ret`) to the
+  build — required for 252-day RMT matrices and spectral ML features. Schema decided at Week-4 start.
+
+### RMT specification update (Week 4)
+
+The stored 63-day matrices ($q=N/T\approx1.6$, singular) are unusable for spectral filtering. RMT
+operates on **252-day** windows ($q\approx0.4$):
+de-volatilise (EWMA) + standardise → diagonalise → effective MP edge with the **Laloux correction**
+$\lambda_+^{\text{eff}} = (1-\lambda_1/N)(1+\sqrt{q})^2$ → clip the bulk to a constant **preserving the
+trace** → renormalise (diag = 1, PSD guaranteed). Unit tests: diag/PSD/trace + **iid-simulation test**
+(empirical spectrum ≈ MP density; filter ≈ identity). Role A: de-noised $\bar\rho_{\text{realised}}$;
+Role B: spectral ML features ($\lambda_1/N$, absorption ratio, $K$ = #eigenvalues > $\lambda_+$,
+$\Delta\lambda_1$, dominant-eigenvector rotation). Also to explore: a **parsimonious leg** (use the
+spectral structure to trade fewer names → less spread paid — the RMT answer to frictions). The
+**dual-window justification** (63d = window-matching of the priced horizon; 252d = spectral health)
+goes in the report. Refs: Bun, Bouchaud & Potters (2017, arXiv:1610.08104); Potters & Bouchaud (2020).
+
+### Research angle added (Week 5)
+
+**Limits-to-arbitrage positioning:** DMV show the premium exists but is killed by frictions
+(single-name spreads × a 101% leg; margins) — market-makers earn it (net flows, margin netting). Our
+RMT (parsimonious leg) and ML (enter only when predicted edge > cost) are *responses to frictions*.
+Falsifiable prediction to test on our 29-year sample (theirs stops in the early 2000s): the premium
+should have **compressed post-2003** as frictions fell → subperiod analysis of $\Pi_t$.
 
 ---
 
@@ -451,15 +599,15 @@ In VS Code, just open a notebook — `.venv` + `.env` are picked up automaticall
 ```
 src/dispersion/
   data/        WRDS access (wrds_client), universe, iv, returns
-  signal/      implied correlation, dispersion spread        (Week 2)
+  signal/      implied correlation, premium & signal (implied_corr)  (Week 2 ✓)
   backtest/    strategy simulation engine                    (Week 3)
   rmt/         Random Matrix Theory filtering                (Week 4)
   ml/          predictive models                             (Week 4, bonus)
   utils/       shared helpers
-notebooks/     exploration (01_explore_vsurfd, 02_explore_crsp)
+notebooks/     exploration (01_explore_vsurfd, 02_explore_crsp, 03_implied_correlation)
 config/        project settings
 data/          raw + processed (git-ignored)
-results/       generated figures and tables
+results/       generated figures and tables (fig_crp_validation.png)
 ```
 
 **Workflow:** explore in `notebooks/`, promote validated logic into `src/`. The final backtest runs
@@ -474,6 +622,20 @@ period (1996–2024) frozen; full data pipeline (`get_universe`, `get_iv`, `get_
 `realized_vol`, `realized_corr_matrix`, `average_correlation`, `build_dataset`); the six aligned
 `.parquet` deliverables built over 1996–2024; and a 6-dimension adversarial QA passed (§9bis).
 
-**Next — Week 2 (signal):** implied correlation via the one-factor formula (§5), the dispersion
-spread $\rho_{\text{implied}}-\rho_{\text{realised}}$, and the empirical validation chart (implied
-above realised on average). See `plan.md` for the full roadmap.
+**Week 2 (theory & signal) — in progress.** DMV (2009) read in full; all core derivations reworked
+(eq. 2; eq. 3 via Itô/Girsanov; eq. 4–5 Carr–Madan; eq. 8–11 hedge structure). Decisions frozen:
+**ATM 91-day IVs** for $\rho_{\text{implied}}$ (§5); **two realised series** — trailing (signal) and
+forward window-matched (premium validation) (§8). DMV benchmarks and conventions recorded (§8bis);
+downstream plan amended (unconditional baseline first, relative greeks + unit test, RMT on 252-day
+windows, post-2003 premium-compression test, Newey–West). **Empirical validation done (notebook 03):**
+$\rho_{\text{implied}} \in [0.12, 0.91]$, zero bound violations and zero NaN over all 7,221 days;
+window-matched premium $\bar\Pi = +0.079$ (t-NW(63) = 7.4, positive on 75% of days) and signal
+$\bar S = +0.078$ (t = 10.6) — **the CRP exists on 1996–2024**. Subperiod preview: 2008–12 = 0.135 vs
+**2020–24 = 0.028 (t = 1.19, not significant)** — a marked recent compression, feeding the Week-5
+limits-to-arbitrage analysis. Chart: `results/fig_crp_validation.png`. Promoted to
+`src/dispersion/signal/implied_corr.py` (reproduces the notebook exactly) and `signal.parquet`
+written — **Week 2 complete** (report write-up of the derivations deferred to Week 5).
+
+**Next — Week 3 (baseline backtest):** explore vsurfd premiums/greeks → settle the premiums-source
+fork (§8bis) → `DispersionEngine`, unconditional v0 first (DMV-comparable), then signal-conditioned
+v1. See `plan.md`.
