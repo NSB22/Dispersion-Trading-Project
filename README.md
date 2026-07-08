@@ -103,10 +103,12 @@ identity (§5) assumes the universe *represents* the index. Cap coverage of the 
 With $N=30$ we ignore ~60% of the index, badly underestimating $\sum_i w_i^2\sigma_i^2$ and biasing
 $\rho_{\text{implied}}$. $N=100$ keeps the truncation error small.
 
-**(b) Random Matrix Theory needs a meaningful $N$.** Marchenko–Pastur separates noise from signal in
-an $N\times N$ correlation matrix via the ratio $q = T/N$ ($T$ = observations). With a 63-day window:
-$N=30 \Rightarrow q\approx 2.1$ (almost no noise bulk to clean — RMT pointless); $N=100 \Rightarrow
-q\approx 0.63$ (a genuine noise band to filter — RMT informative).
+**(b) Random Matrix Theory needs a meaningful $N$.** The RMT layer (§8bis) filters the spectrum of an
+$N\times N$ correlation matrix estimated on 252-day windows ($q = N/T \approx 0.4$). A small universe
+starves it of **spectral resolution**: $N=30$ yields only 30 eigenvalues, with $O(N^{-2/3})$
+edge fluctuations that blur the Marchenko–Pastur boundary and leave few bulk eigenvalues to clean;
+$N=100$ gives a well-populated spectrum where bulk and signal separate reliably. (The 63-day matrices
+are a different object — degenerate, kept only for the window-matched scalar $\bar\rho$; see §6.3.)
 
 **(c) Statistical robustness of $\bar\rho$.** $N=30$ → 435 pairs; $N=100$ → 4 950 pairs. The average
 correlation is far more stable and less sensitive to a single outlier.
@@ -138,7 +140,7 @@ universe is stable ⇒ low roll cost and a coherent realised-correlation matrix 
   which lives in the access-denied `idx_const_*_v2`. We use total market cap. Small effect for
   mega-caps but non-zero.
 - **Renormalised over the top-100**, not the full 500 (consistent with the truncation in §5).
-- **Weights computed only at the ~60 rebalancing dates** (15 yrs × 4), not daily. Positions are then
+- **Weights computed only at the ~116 rebalancing dates** (29 yrs × 4), not daily. Positions are then
   **frozen between rebalances** — see §7.
 
 ---
@@ -200,8 +202,10 @@ where $\sigma_I$ = SPX implied vol (secid 108105), $\sigma_i$ = constituent $i$ 
 weights. (This is the CBOE-style implied-correlation construction; DMV 2009, eq. 2.)
 
 **Vol inputs — decided (Week 2, after full DMV reading): ATM 91-day IVs, not MFIV.** DMV build
-implied correlation from **model-free implied variance** (Carr–Madan:
-$\sigma^2_{MF} = 2\int \frac{C(K)-\max(S_0-K,0)}{K^2}\,dK$), which integrates the whole smile. We feed
+implied correlation from **model-free implied variance** (Carr–Madan, zero-rate sketch:
+$\sigma^2_{MF} = \frac{2}{T}\int_0^\infty \frac{C(K)-\max(S_0-K,0)}{K^2}\,dK$ — the $1/T$ annualises
+the expected total variance $E^{\mathbb Q}\!\int_0^T \sigma_t^2\,dt$; the full version discounts and
+splits at the forward), which integrates the whole smile. We feed
 **ATM ($\pm50\Delta$) 91-day IVs** instead, for three reasons:
 
 1. **Instrument consistency** — the strategy trades ATM straddles (§7): the correlation premium
@@ -218,8 +222,10 @@ $\sigma^2_{MF} = 2\int \frac{C(K)-\max(S_0-K,0)}{K^2}\,dK$), which integrates th
 (index IV below the weighted-average component IV — diversification), consistent with the QA finding
 that component IV exceeds index IV on every one of the 7221 days; and
 $\rho_{\text{implied}} \ge 0 \iff \sigma_I^2 \ge \sum_i w_i^2\sigma_i^2$, essentially always true (the
-concentration term $\sum_i w_i^2$ is tiny for $N=100$). Both checks are run and violation counts
-reported rather than clipped.
+concentration term $\sum_i w_i^2$ is tiny for $N=100$ — measured Herfindahl $\in [0.015, 0.037]$).
+Both equivalences hold given the strictly positive denominator: $(\sum_i v_i)^2 - \sum_i v_i^2 =
+\sum_{i\neq j} v_iv_j > 0$ automatically for $N\ge2$ with positive weights and vols. Both checks are
+run and violation counts reported rather than clipped.
 
 **Index–basket basis (documented).** The numerator uses SPX IV (the full 500-name index) while the
 sums run over our top-100 basket — the measure embeds an index-vs-basket basis. This is the *same*
@@ -236,7 +242,8 @@ equicorrelation-factor assumption). The RMT layer (§8bis) revisits the full mat
   exact analogue of the listwise choice on the realised side, §6.3), with an `n_names` coverage column
   and a **coverage floor**: the day is invalidated below 90/100 names (a free guard — observed minimum
   is 91). *The data check that settled it:* a strict "drop any day with a missing name" rule would
-  delete **54.9% of days** (3,962/7,221 — ~3 names lack a score-1 secid link for entire quarters, so
+  delete **54.9% of days** (3,962/7,221 — ~3 names have no vsurfd option surface for entire quarters
+  despite a valid secid link, §9bis, so
   those quarters never reach 100/100), while the missing weight on affected days is only **1.3%
   (median) / 7.2% (max)** of the basket. Renormalisation is innocuous; dropping is destructive.
 - **Bound violations stored raw** — no clipping. Violation counts are reported as diagnostics;
@@ -280,7 +287,8 @@ $\rho_{\text{implied}}-\rho_{\text{realised}}$ meaningless.
 **Windows:** $W=63$ trading days (≈ 91 calendar days — **matches the 91-day IV horizon**, primary)
 and $W=21$ (≈ 1 month, reactive secondary / ML feature). **Minimum observations** (~80% coverage):
 $W=63 \Rightarrow$ min 50; $W=21 \Rightarrow$ min 17. Below that, the value is NaN — a vol/correlation
-from too few points is unreliable, and this also protects the RMT ($q=T/N$) in §8.
+from too few points is unreliable, and this keeps the §6.3 correlation objects usable (the RMT layer
+itself runs on 252-day windows — §8bis).
 
 ### 6.3 Realised correlation
 
@@ -311,8 +319,10 @@ $\bar\rho_{\text{realised}} \approx 0.77$ vs $\approx 0.44$ on 2019-09-30 (calm)
 spikes in stress, as expected.
 
 **Rank deficiency — a feature, not a bug.** With $T=63 < N=100$, the matrix is PSD but **singular**
-(rank $\le T-1=62$, so ~38 zero eigenvalues). One eigenvalue dominates (~75% of total variance) — the
-**market factor**. In the Marchenko–Pastur convention $q=N/T\approx1.6>1$ ($T<N \Rightarrow$ point
+(rank $\le T-1=62$, hence $\ge 38$ zero eigenvalues — exactly 38 in the generic full-panel case). The
+**market mode** carries a median $\lambda_1/N \approx 34\%$ of total variance across the 116 stored
+matrices, spiking to ~75% at the COVID extreme (2020-03-31; 0.73 on 2011-09-30, 0.68 on 2008-12-31).
+In the Marchenko–Pastur convention $q=N/T\approx1.6>1$ ($T<N \Rightarrow$ point
 mass at zero): the 63-day spectrum is **degenerate**, so spectral filtering cannot run on it. The RMT
 layer therefore operates on **252-day** windows ($q\approx0.4$, §8bis); the 63-day object is kept only
 for the window-matched scalar $\bar\rho$ (two windows, two uses — see §8bis).
@@ -349,10 +359,16 @@ carry a trailing buffer so the 63-day windows are warm.
 | `realized_corr` | `date, rho_bar, rho_bar_equal` | daily |
 | `corr_matrices` | `rebalance_date, permno_i, permno_j, corr` | per rebalance |
 | `signal` | `date, rho_implied, rho_trailing, rho_forward, premium, signal, n_names` | daily (Week 2) |
+| `surface` | `rebalance_date, date, permno, secid, days, cp_flag, iv, premium, strike` | daily × name × pillar (10/30/60/91d) × leg — **raw**, marking-grade (Week 3; SPX rows have `permno = NA`) |
+| `spots` | `rebalance_date, date, permno, secid, close, cfadj` | daily × name (+ SPX) — `secprd` closes + split factors, same convention as the strikes |
+| `rates` | `date, days, rate` | daily zero curve (`zerocd`, %) |
+| `returns` | `date, permno, ret` | daily × constituent (union), from 1995 (252d RMT buffer) |
 
 The dataset is fully reproducible from `data/raw` (here, directly from WRDS) by re-running
-`build_dataset`; `signal.parquet` is rebuilt from the six base files by
-`dispersion.signal.implied_corr.build_signal` (§5, §8).
+`build_dataset`; `signal.parquet` is rebuilt from the base files by
+`dispersion.signal.implied_corr.build_signal` (§5, §8). The signal-grade series keep the cleaning
+policy above; `surface`/`rates`/`returns` are stored **raw** (marking-grade — any guarding happens at
+consumption, in the engine).
 
 ## 7. Trade mechanics
 
@@ -382,6 +398,48 @@ straddles. Reasons:
    and only the *net delta* is traded. Re-striking daily would not survive transaction costs.
 3. **Structure.** Re-striking daily resets strikes/greeks and churns theta+spread, destroying the
    "hold dispersion to expiry" exposure. Re-striking happens **only at the quarterly rebalance**.
+
+### 7.3 Engine design decisions (Week 3 — frozen, with the rationale to carry into the write-up)
+
+1. **Book sizing: DMV wealth normalisation.** The book is expressed in **fractions of wealth**,
+   anchored at −100% of wealth in the index straddle; the component-leg sizes follow from the
+   relative-vega-neutral ratios (eq.-10 type), and the residual index delta-hedge plus the
+   money-market account complete the balance sheet. *Rationale (thesis point):* (i) returns become
+   **directly comparable to DMV Table II** — our only external benchmark (weights
+   −100/+101.12/−32.54/+131.42, 10.37%/mo, Sharpe 0.73), which is the whole purpose of the
+   unconditional v0; (ii) it is a pure *reporting* convention — the strategy is scale-invariant, so a
+   vega-notional view is a re-scaling of the same strategy, not a different one.
+
+2. **Delta hedge: the index alone, daily.** Under the one-factor structure — the *same* assumption
+   underlying $\rho_{\text{implied}}$ (§5) and DMV's eq. (6) — eq. (11) shows the residual delta of
+   the vega-hedged book loads on the **index alone**, while idiosyncratic deltas across ~100 long
+   straddles diversify away. *Rationale (thesis point):* (i) **model consistency** — we assume
+   one-factor everywhere, so the index hedge is the hedge implied by our own model; (ii) **costs** —
+   one instrument at ~0.5–2 bps (index future/ETF) instead of ~100 daily single-name lines each
+   paying spread + impact; DMV Table V shows frictions *halve* the strategy's returns, so minimising
+   hedge legs is limits-to-arbitrage-aware design, not cosmetics; (iii) consistency with their
+   −32.54% average index position. Per-name hedging = Week-5 robustness check if time allows.
+
+3. **Expiry: intrinsic settlement at the next rebalance.** The 91d straddle bought at rebalance $R$
+   expires within ±3 calendar days of the next rebalance (quarters run 89–92 days). The book settles
+   at **intrinsic value** $|S-K|$ per leg at the next rebalance (the ±3d gap is a documented
+   approximation) — DMV's held-to-maturity convention (spread paid once), and no marking of
+   near-expired options where the surface has no pillar.
+
+4. **Sub-30d marking: σ frozen at the daily 30d pillar.** Daily marks interpolate the ATM pillars
+   30/60/91 **linearly in total variance**; below 30 days of residual maturity,
+   $\sigma(\tau) :=$ that day's $\sigma(30d)$ (re-read **daily** — only the short-end *slope* is
+   ignored, never the level moves). One uniform rule across names and dates — the vendor's sparse 10d
+   pillar (~37% populated, §9bis) would otherwise make the marking panel heterogeneous. Second-order
+   by construction of (3): near-expiry values are never realised through marks, they settle at payoff.
+
+**Documented marking approximation — ATM proxy.** Aged positions are marked by applying the ATM
+(±50Δ) IV at the residual maturity to the **fixed entry strike** via BS: as spot drifts, the true
+option leaves the ATM point and the mark ignores the smile at the drifted moneyness. This is
+second-order for the strategy's *cumulative* return: each quarter's P&L is anchored by real entry
+premiums (`impl_premium`) and intrinsic settlement (3), so the ATM proxy shapes only the
+intra-quarter path (daily P&L, drawdowns, hedge deltas). Full smile marking (delta-grid extraction)
+is a possible Week-5 refinement.
 
 ---
 
@@ -462,18 +520,71 @@ any interpretation.
 4. Moneyness in **BS deltas**, not strike/spot (already our extraction grid ✓).
 5. **Historical index composition** at each date (already point-in-time ✓).
 6. Hedge-ratio greeks are **relative** (per dollar invested: vega/option-price). OptionMetrics/BS give
-   per-contract greeks → conversion utilities + **unit test** on a closed-form BS case (Week 3). Mixing
-   conventions produces a silently wrong hedge.
+   per-contract greeks; mixing conventions produces a silently wrong hedge. **Implemented** in
+   `dispersion.utils.greeks` (BS + Black-76 pricing/greeks, per-contract↔relative conversions,
+   put-call-parity forward, implied vol, straddle aggregation) with a 10-test pytest suite
+   (`tests/test_greeks.py`): closed forms, put-call parity, bump-and-reprice finite differences, the
+   **anti-trap test** (a relative-vega hedge is wealth-vega-neutral; a per-contract-vega ratio leaves
+   a residual equal to the price ratio), and reproduction of the real 2024-06-28 SPX standardised
+   premiums to ±0.5%.
 
-### Open forks (deliberately pending — they depend on future exploration)
+### Decided (Week 3, notebook 04): premiums from the surface, greeks analytic
 
-- **Week 3 — premiums/greeks source:** re-extract `impl_premium`/`impl_strike` from `vsurfd`
-  (interpolation across surface maturities needed to mark ageing positions) **vs** recompute
-  Black–Scholes from stored IV (needs `optionm.zerocd` risk-free + dividend treatment). Decide after
-  inspecting the surface columns.
-- **Week 3 — transaction costs:** real spreads from `optionm.opprcd` (huge table, non-trivial matching
-  of 91-day standardised options to listed contracts) **vs** parametric spreads calibrated on an
-  `opprcd` sample (+ sensitivity analysis).
+Evidence (notebook `04_explore_premiums`, test date 2024-06-28 + coverage checks 1996/2005/2015):
+`vsurfd` natively carries `impl_premium` and `impl_strike` on our frozen grid (91d, ±50Δ), fully
+populated since 1996 (SPX 504/504 rows in each test year; point-in-time universe 198–200/200 at the
+test rebalances). Naive BS with $q=0$ misprices the standardised premiums by **±5%** (underprices
+puts, overprices calls — the dividend signature), while the dividend yield backed out of
+`impl_premium` is **identical across the two SPX legs (1.04%)**: the vendor premiums are
+forward-consistent. Replicating them ourselves would require index dividend yields plus
+American-exercise / discrete-dividend handling for single names — heavy and fragile.
+**Decision:** straddle **prices** come from `impl_premium` (re-extraction alongside the IV);
+**greeks** are computed analytically (BS/Black-76 from IV + strike + forward — via `optionm.fwdprd`
+or put-call parity — and `zerocd` rates), which we need anyway for the *relative*-greeks conversions
+and their unit test (§8bis conventions).
+
+**Ageing-position marking (decided): daily mark-to-surface.** The book is revalued **daily** by
+interpolating the standardised surface at each position's residual maturity (maturity pillars below
+91d, linear in **total variance** at fixed delta). This yields effective daily delta-hedging (as the
+plan specifies), a vega/gamma/theta P&L decomposition, proper drawdown statistics, and the daily
+series the ML layer (Week 4) needs as labels. The DMV holding-period version stays available for free
+by quarterly aggregation (benchmark comparison). Constant-IV marking was rejected outright: a vol
+strategy's P&L *is* vega×ΔIV — freezing the IV assumes away the object being traded. Implies a
+multi-pillar re-extraction, bundled into the single dataset rebuild (with the `impl_premium` columns,
+the §9bis hardening, and Week 4's `returns.parquet`).
+
+### Decided (Week 3, notebook 05): transaction costs — calibrated parametric grid
+
+**Calibration on real `opprcd` quotes** (notebook `05_explore_costs`): median relative bid-ask spread
+(full bid→ask, % of premium) of ~ATM options (|Δ| ∈ [0.35, 0.65]), 60–120 days to expiry, open
+interest > 0, pooled over three quarter-ends per era:
+
+| Era | SPX | Mega-caps (rnk 1–10) | Small lines (rnk 90–100) |
+|---|---|---|---|
+| 1998 | 0.9% | 6.8% | 9.8% |
+| 2005 | 1.6% | 6.1% | 5.4% |
+| 2012 | ⚠ 7.6% | 1.1% | 2.6% |
+| 2020 | 0.7% | 3.0% | 7.9%* |
+| 2024 | 0.6% | 1.2% | 3.1% |
+
+**Why parametric rather than raw `opprcd` spreads.** (i) The 2012 SPX cell (tight IQR, n=130) is an
+**end-of-day quote artefact** of the pit era — quoted EOD spreads ≠ effective spreads (the
+effective-vs-quoted literature puts effective at ~30–50% of quoted for options); a raw extraction
+would inherit era-inconsistent measurement, not economics. (ii) The 2020 small-cap cell includes
+2020-03-31 — spreads widen in stress, a real property, but one to model as a *scenario* (S5), not to
+hard-code from one COVID quarter. (iii) A full per-name/per-day extraction (~2 days of work) would
+still face quoted≠effective.
+
+**The grid (frozen):** three groups — SPX / rnk 1–50 / rnk 51–100 — with **linear-in-time
+interpolation** between 1996 and 2024 anchors, smoothing the noisy cells:
+SPX 1.0% → 0.6%; large 7.0% → 1.2%; small 10.0% → 3.0% (clamped outside). The declining anchors ARE
+the friction-compression story of §8bis (limits to arbitrage) embedded in the cost model.
+
+**Application (DMV "spread paid once", held to maturity):** each entry leg pays **½ × relative
+spread × premium** (`impl_premium` is mid-like, we cross half the quoted spread); the daily delta
+hedge pays **1 bp of traded notional** (|Δn|×S, index future); intrinsic settlement pays no spread.
+**Conservative by construction:** calibrated on *quoted* spreads while effective is ~2× tighter —
+net results are an honest lower bound. Week-5 sensitivity: grid ±50% and a "stress ×2" variant.
 - **Week 4 — `returns.parquet`:** add a stored daily-returns panel (long: `date, permno, ret`) to the
   build — required for 252-day RMT matrices and spectral ML features. Schema decided at Week-4 start.
 
@@ -523,7 +634,7 @@ parquet files, every flagged finding independently re-verified). Verdict:
 | Weights integrity | **PASS** | 116×100 = 11 600 rows; Σweights = 1 ± 4e-16 everywhere; 0 duplicate permno/secid; rnk 1..100 complete |
 | Point-in-time / anti-look-ahead | **PASS** | 116 rebalances all quarter-end; WRDS-confirmed membership (6/6); no data before the 1st rebalance |
 | Coverage / NaN over time | **WARN** | iv_index 0 NaN; iv_components 0.13% NaN; 1 issue → Aug-2020 vendor gap (below) |
-| Value plausibility (29y) | **PASS** | ρ̄ ∈ [0.06, 0.83]; **component IV > index IV on all 7 221 days** (mean ratio 1.60); crisis peaks correctly dated |
+| Value plausibility (29y) | **PASS** | ρ̄ ∈ [0.08, 0.83] (weighted; equal-weighted [0.06, 0.80]); **component IV > index IV on all 7 221 days** (mean ratio 1.60); crisis peaks correctly dated |
 | Cross-file consistency | **WARN** | calendars/keys align exactly; minor: 3 names lack option IV some quarters (below) |
 | Cleaning correctness | **PASS** | ffill bound respected (max run 4d); SPX peaks un-clipped; strict-intersection calendar exact |
 
@@ -549,9 +660,39 @@ documented; **none is a pipeline bug**.
   name-quarters out of 11 600 (0.37%): OptionMetrics has no option surface for them those quarters, so
   the implied-correlation aggregation runs on <100 names there (they remain present in weights and the
   realised series).
-- **Realised-vol tail NaN before delistings** (~1 455 obs, 0.23%): a name's returns dry up a few days
-  before it leaves the universe, so it keeps its frozen weight but has no realised vol for those last
-  days (minor effect on the $w_i\sigma_i$-weighted $\bar\rho$ at the very end of a holding interval).
+- **Realised-vol tail NaN before delistings** (1 624 `vol_63` / 1 923 `vol_21` obs, ~0.2%): a name's
+  returns dry up a few days before it leaves the universe, so it keeps its frozen weight but has no
+  realised vol for those last days (minor effect on the $w_i\sigma_i$-weighted $\bar\rho$ at the very
+  end of a holding interval).
+
+**Week-2 full-project audit (four independent axes: data layer, signal layer, mathematics, doc
+consistency).** Zero critical/computational findings; $\rho_{\text{implied}}$ independently recomputed
+on 6 test dates (max deviation 8e-16); every quoted statistic reproduced from the parquets. Addenda:
+
+- **The single $\bar\rho$ NaN (2015-07-22) — mechanism identified.** A knife-edge listwise
+  interaction: a delisting name (permno 13598) passes the per-name `min_obs=50` filter with exactly 50
+  observations, its NaN days then shrink the complete-case row set below `min_obs` for the *whole*
+  panel → `realized_corr_matrix` returns `None` for the day. Neighbouring days (10–21 Jul 2015) were
+  estimated on 51–62 rows instead of 63 (slightly noisier, accepted). One day in 7 221; kept as NaN.
+- **Truncated NaN tails in `iv_components` — FIXED at the Week-3 rebuild (8 Jul).** The cleaning
+  reindex now spans each quarter's full active window: +2,183 rows materialised (2,032 NaN tails +
+  151 cells filled by the documented ≤3-day ffill extension). Effect on the signal: 139 days moved by
+  at most 8e-3 in `rho_implied` (headline stats unchanged: premium +0.079, t-NW = 7.4). All other
+  signal-grade parquets reproduced **bit-identical**.
+- **Latent code guards — HARDENED at the Week-3 rebuild (8 Jul):** `iv.py` missing-leg guard fixed
+  (np.nan, no TypeError path); `universe.py` uses `ROW_NUMBER` with a deterministic permno tiebreak
+  (an exact cap tie at rank 100 can no longer admit >N rows); `assemble.py` no longer has a
+  stale-row fallback for the rho-bar vols; `implied_corr.py` hard-fails on index-IV/spine calendar
+  mismatches. Still latent (unfixable without WRDS-side data): a constituent suspended (no `dsf`
+  row) on the exact rebalance date would silently drop to the 101st name.
+- **Marking-grade data limitations (Week-3 rebuild QA):** the 10-day surface pillar is only
+  partially populated by the vendor (~37% of component rows vs the full 30/60/91 pillars; also
+  sparse for SPX) → the engine needs a sub-30d fallback rule (flat extrapolation from 30d or
+  near-expiry settlement), posed at the engine-design step. `zerocd` is missing on 10 of the 7,281
+  calendar days → rates need a bounded ffill at consumption. Universe **rotation at settlement**:
+  ~5 positions per quarter (621 over the 115-quarter backtest) settle on the *previous day's* close —
+  a name leaving the top-100 has no settlement-day row in its quarter's `spots` partition. One-day
+  staleness on ~1% of the book; fix at the next rebuild by extending each partition by one day.
 
 ## 10. Setup
 
@@ -588,7 +729,7 @@ The password is never stored; WRDS prompts once and offers to create a `.pgpass`
 uv run --env-file .env python -m dispersion.data.wrds_client
 
 # Run a notebook headless
-cd notebooks && uv run --env-file ../.env jupyter nbconvert --to notebook --execute --inplace 01_explore_vsurfd.ipynb
+uv run --env-file .env jupyter nbconvert --to notebook --execute --inplace exploration_notebooks/01_explore_vsurfd.ipynb
 ```
 In VS Code, just open a notebook — `.venv` + `.env` are picked up automatically.
 
@@ -603,15 +744,17 @@ src/dispersion/
   backtest/    strategy simulation engine                    (Week 3)
   rmt/         Random Matrix Theory filtering                (Week 4)
   ml/          predictive models                             (Week 4, bonus)
-  utils/       shared helpers
-notebooks/     exploration (01_explore_vsurfd, 02_explore_crsp, 03_implied_correlation)
-config/        project settings
+  utils/       greeks.py — BS/Black-76 + relative conversions (Week 3 ✓)
+tests/         pytest suite (test_greeks.py)
+exploration_notebooks/   01_explore_vsurfd, 02_explore_crsp, 03_implied_correlation,
+                         04_explore_premiums, 05_explore_costs, 06_backtest_results
+config/        reserved (parameters currently live as module function defaults)
 data/          raw + processed (git-ignored)
-results/       generated figures and tables (fig_crp_validation.png)
+results/       figures/ + tables/ (generated; figures/fig_crp_validation.png)
 ```
 
-**Workflow:** explore in `notebooks/`, promote validated logic into `src/`. The final backtest runs
-from the `.py` modules (reproducibility).
+**Workflow:** explore in `exploration_notebooks/`, promote validated logic into `src/`. The final
+backtest runs from the `.py` modules (reproducibility).
 
 ---
 
@@ -622,7 +765,7 @@ period (1996–2024) frozen; full data pipeline (`get_universe`, `get_iv`, `get_
 `realized_vol`, `realized_corr_matrix`, `average_correlation`, `build_dataset`); the six aligned
 `.parquet` deliverables built over 1996–2024; and a 6-dimension adversarial QA passed (§9bis).
 
-**Week 2 (theory & signal) — in progress.** DMV (2009) read in full; all core derivations reworked
+**Week 2 (theory & signal) — complete.** DMV (2009) read in full; all core derivations reworked
 (eq. 2; eq. 3 via Itô/Girsanov; eq. 4–5 Carr–Madan; eq. 8–11 hedge structure). Decisions frozen:
 **ATM 91-day IVs** for $\rho_{\text{implied}}$ (§5); **two realised series** — trailing (signal) and
 forward window-matched (premium validation) (§8). DMV benchmarks and conventions recorded (§8bis);
@@ -632,10 +775,47 @@ $\rho_{\text{implied}} \in [0.12, 0.91]$, zero bound violations and zero NaN ove
 window-matched premium $\bar\Pi = +0.079$ (t-NW(63) = 7.4, positive on 75% of days) and signal
 $\bar S = +0.078$ (t = 10.6) — **the CRP exists on 1996–2024**. Subperiod preview: 2008–12 = 0.135 vs
 **2020–24 = 0.028 (t = 1.19, not significant)** — a marked recent compression, feeding the Week-5
-limits-to-arbitrage analysis. Chart: `results/fig_crp_validation.png`. Promoted to
+limits-to-arbitrage analysis. Chart: `results/figures/fig_crp_validation.png`. Promoted to
 `src/dispersion/signal/implied_corr.py` (reproduces the notebook exactly) and `signal.parquet`
-written — **Week 2 complete** (report write-up of the derivations deferred to Week 5).
+written. The week closed with a **four-axis adversarial audit** (data, signal, mathematics, doc
+consistency): zero critical findings, documentation corrections applied, latent guards recorded in
+§9bis. Report write-up of the derivations deferred to Week 5.
 
-**Next — Week 3 (baseline backtest):** explore vsurfd premiums/greeks → settle the premiums-source
-fork (§8bis) → `DispersionEngine`, unconditional v0 first (DMV-comparable), then signal-conditioned
-v1. See `plan.md`.
+**Week 3 (baseline backtest) — in progress.** Step 1 done (notebook 04): `vsurfd` carries
+`impl_premium`/`impl_strike` on our frozen grid, fully populated since 1996; naive BS(q=0) misprices
+the standardised premiums by ±5% while the SPX implied dividend yield backed out of `impl_premium` is
+leg-consistent (1.04%). **Fork decided (§8bis):** prices from `impl_premium` (re-extraction), greeks
+analytic (BS/Black-76 from IV + forward via `fwdprd`/put-call parity + `zerocd`). Step 2 done:
+`dispersion.utils.greeks` + 10-test pytest suite (§8bis item 6). Marking fork decided: **daily
+mark-to-surface** (§8bis). Step 3 done (8 Jul): the **bundled dataset rebuild** — `surface.parquet`
+(4.9M rows, pillars 10/30/60/91d, zero NaN), `spots.parquet` (724k `secprd` closes + `cfadj`;
+169/329 names have mid-history splits — settlement prices share the strikes' convention),
+`rates.parquet`, `returns.parquet` (329 permnos from 1995), §9bis hardening and tail fix;
+non-regression: prior parquets reproduced identically, signal moved on 139 days by ≤8e-3 (documented
+policy now correctly applied), headline stats unchanged. Step 4 partly done: engine design frozen
+(§7.3) and `backtest/marking.py` implemented (total-variance interpolation, `RateCurve`,
+split-adjusted strikes) — full pytest suite 17/17. Step 5 done: `DispersionEngine`
+(`backtest/engine.py`, +5 closed-form tests, 22/22) and the **unconditional v0 executed** over 115
+quarters: **the DMV guards hold** — Σy = 99.5% (theirs +101.12%), gross Sharpe 0.77 (theirs 0.73),
+70% positive quarters, skew −1.29, worst quarters = Q1-2018 Volmageddon (−91%), Q3-2024 (−41%),
+summer 2002 — gross maxDD −95.8%, the central motivation for v1/ML tail-cutting. A key convention was
+pinned down: DMV's vega-neutrality is to **proportional** vol shocks (ATM straddle ν ≈ 1/σ ⇒ Σy ≈ 1
+— the only convention reproducing their +101.12%). The Q1-2018 quarter was dissected via the daily
+ledger: the −91% is the **index gamma-hedge bleed** (−154% of wealth on real SPX closes; both option
+legs ended positive) — the realised-correlation loss channel, not a marking artefact. **v1**
+(ex-ante median gate, 58/115 quarters): better premium per traded quarter (+7.9% vs +7.3%), dodges
+2024/2002/Lehman, switches the strategy off post-2020 (the compression at work), but trades Q1-2018 —
+the spread measures premium richness, not danger → the quantified case for Week-4 ML regime timing.
+**Net of the §8bis cost grid: DMV Table V replicates on our 29 years** — v0 Sharpe 0.77 → 0.42
+(theirs 0.73 → 0.41), return ÷1.8, cumulative ×165 → ×2.5 (~3%/yr net, marginal); v1 dies net (×1.1)
+as its traded quarters cluster in the wide-spread era. Deliverables shipped (notebook 06):
+`results/figures/fig_backtest_s3.png` (log-NAV, four variants, crises annotated),
+`results/tables/table_s3_metrics.csv` (v0 net t-stat = 2.24 — the premium survives costs,
+marginally) and `table_s3_dmv_sanity.csv`; P&L attribution from the daily ledger — calm quarters
+earn on the short index leg (+10.9%) while **crisis quarters lose through the delta-hedge (−23.0%,
+the realised-variance/gamma channel)**. **Week 3 complete** (Jul 8 — 11 days ahead of schedule).
+
+**Next — Week 4 (RMT + optional ML):** 252-day correlation matrices from `returns.parquet`,
+Marchenko–Pastur + Laloux clipping pipeline (§8bis spec), de-noised $\bar\rho$ re-injected into the
+signal and re-backtested vs baseline; ML regime layer with the quantified bar set by v1: beat net
+Sharpe 0.42 by cutting the −40/−90% quarters. See `plan.md`.

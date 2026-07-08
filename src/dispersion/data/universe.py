@@ -50,8 +50,10 @@ def get_universe(db: wrds.Connection, date: str, n: int = 100) -> pd.DataFrame:
           AND d.shrout IS NOT NULL
     ),
     ranked AS (
+        -- ROW_NUMBER, not RANK: an exact cap tie at rank N would otherwise admit >N rows
+        -- (never observed in 116 rebalances — audit §9bis); permno = deterministic tiebreak
         SELECT permno, market_cap,
-               RANK() OVER (ORDER BY market_cap DESC) AS rnk
+               ROW_NUMBER() OVER (ORDER BY market_cap DESC, permno) AS rnk
         FROM capi
     ),
     top_n AS (

@@ -42,6 +42,7 @@ ml = [
 dev = [
     "ruff>=0.6",
     "black>=24.0",
+    "pytest>=9.1.1",
 ]
 
 [tool.ruff]

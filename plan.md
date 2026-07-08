@@ -47,14 +47,15 @@
 - [✅] **Micro-choix d'implémentation (8 juil., vérifiés sur données)** : IV manquante → renormalisation quotidienne des poids sur titres disponibles + plancher 90/100 (« supprimer les jours » aurait détruit 54,9 % de l'échantillon ; poids manquant médian 1,3 %) ; ρ_implied stocké **brut** + compteurs de violations ; livrable `signal.parquet` ; `secid` → Int64 (README §5.1)
 
 ### Corrélation implicite (implémentation)
-- [✅] Formule d'inversion implémentée + validée (notebook 03, 8 juil.) — reste : promotion `src/dispersion/signal/implied_corr.py` + écriture `signal.parquet`
+- [✅] Formule d'inversion implémentée + validée (notebook 03, 8 juil.) → promue en `src/dispersion/signal/implied_corr.py`
 - [✅] ρ_realized depuis la covariance réalisée (fait en S1 : ρ̄ pondérée quotidienne, option B — même forme fonctionnelle que l'inversion ⟹ spread pomme-à-pomme)
 - [✅] Séries **premium** et **signal** calculées : Π̄ = **+0.079 (t-NW63 = 7.4, 75 % j > 0)**, S̄ = +0.078 (t = 10.6, 80 % j > 0) → **thèse CRP validée sur 1996–2024**
 - [✅] Vérification bornes : ρ_implied ∈ [0.12, 0.91] — **0 violation, 0 NaN** sur 7221 j ; couverture min 91/100 (plancher jamais atteint)
 - [✅] Aperçu sous-périodes : 2008–12 = 0.135 (t=4.3) ; **2020–24 = 0.028 (t=1.19, non significatif)** → compression récente de la prime, à creuser en S5 (limits-to-arbitrage)
-- [✅] Promotion : `src/dispersion/signal/implied_corr.py` (`implied_correlation` + `build_signal`) + `signal.parquet` écrit (7221 j × 7 col.) — reproduit le notebook à l'identique. **SEMAINE 2 TERMINÉE** (rédaction des dérivations → S5).
+- [✅] Promotion : `src/dispersion/signal/implied_corr.py` (`implied_correlation` + `build_signal`) + `signal.parquet` écrit (7221 j × 7 col.) — reproduit le notebook à l'identique.
+- [✅] **Audit complet fin S2** (4 axes indépendants : données, signal, maths, cohérence) : 0 finding critique ; ρ_implied recalculé indépendamment (écart ~1e-16) ; corrections documentaires appliquées ; fragilités latentes → README §9bis. **SEMAINE 2 TERMINÉE** (rédaction des dérivations → S5).
 
-**Livrable :** ✅ `signal.parquet` + graphe de validation `results/fig_crp_validation.png` (implicite au-dessus du réalisé forward, premium window-matché).
+**Livrable :** ✅ `signal.parquet` + graphe de validation `results/figures/fig_crp_validation.png` (implicite au-dessus du réalisé forward, premium window-matché).
 
 **Piège :** approximation one-factor (corrélation moyenne unique) — à assumer et documenter (DMV éq. 6 fait la même hypothèse).
 
@@ -65,25 +66,29 @@
 **Objectif :** un backtest qui tourne, sans ML = benchmark de référence.
 
 ### Moteur
-- [ ] Classe `DispersionEngine` (ouverture/fermeture, suivi P&L)
-- [ ] Portefeuille : long straddles composants, short straddle indice
-- [ ] **v0 inconditionnel D'ABORD** (trade systématique à chaque rebal. — seul comparable aux benchmarks DMV Table II), puis v1 conditionné au seuil de signal — sépare « la prime existe » de « on sait la timer »
-- [ ] Greeks 1er ordre (Delta, Vega) ; Vega-neutre à l'entrée, Delta-neutre en rééquilibrage quotidien — hedge triangulaire DMV éq. (10)–(11) : vega d'abord, delta résiduel avec l'indice
-- [ ] Grecques **relatives** (vega/prix, par dollar investi) — conversions brut↔relatif dans `utils` + **test unitaire** sur cas BS en forme fermée (piège : mélange de conventions = hedge silencieusement faux)
-- [ ] ⏸ Fork en suspens : source des primes/grecques — `impl_premium` (vsurfd, interpolation entre maturités pour marquer les positions vieillissantes) vs recalcul Black–Scholes (+ `zerocd`, dividendes). À trancher après exploration de la surface.
+- [✅] `backtest/marking.py` (8 juil.) : interpolation en variance totale 30/60/91 + σ(30j) gelée, `RateCurve` (ffill borné, échec bruyant), `adjust_strike` (splits cfadj) — 7 tests pytest (17/17 au total)
+- [✅] Classe `DispersionEngine` (8 juil., `backtest/engine.py`) : book short straddle indice / long straddles composants, entrée aux primes réelles + q̂ par parité C−P, sizing richesse λ (neutralité aux chocs PROPORTIONNELS de vol — seule convention qui reproduit le +101,12 % de DMV, car ν≈1/σ pour un straddle ATM), marquage quotidien, hedge delta indice quotidien (éq. 10–11), règlement intrinsèque, splits cfadj, v1 câblée (`threshold`) — **5 tests en forme fermée** (22/22 au total)
+- [✅] **v0 inconditionnel EXÉCUTÉ (8 juil., 222 s, 115 trimestres) — benchmarks DMV AU RENDEZ-VOUS** : **Σyᵢ = 99,5 %** (eux +101,12 %), **Sharpe brut 0,77** (eux 0,73), 70 % trimestres > 0, skew −1,29 ; ret trim. moyen +7,3 % brut ; pires trimestres = **Q1-2018 Volmageddon (−91 %), Q3-2024 yen carry (−41 %), été 2002 (−30 %)** ; maxDD −95,8 % brut → l'argument central pour v1/ML (couper les queues). Compteurs : marks gelés 0,21 j/pos/trim ; 621 règlements au spot J-1 = rotation d'univers (~5/trim, fix au prochain rebuild). Sorties : `backtest_v0_{daily,quarterly}.parquet`
+- [✅] **Mécanisme Q1-2018 CONFIRMÉ via ledger** (pas un artefact) : jambe indice +20 % de W, composants +2 %, **delta-hedge −154 % de W** = bleed de gamma sur clôtures SPX réelles (indépendant du modèle de marquage) — le canal « variance réalisée de l'indice explose quand la corrélation spike » (éq. 3 DMV). NAV intra-trimestre tombé à 6 % de W → sizing richesse inconditionnel = quasi-ruine (cohérent DMV Table VI marges)
+- [✅] Grecques **relatives** (8 juil.) : `src/dispersion/utils/greeks.py` (prix/grecques BS + Black-76, conversions contrat↔relatif, forward par parité, IV implicite, straddles) + **10 tests pytest** (`tests/test_greeks.py`) : formes fermées, parité, différences finies, test anti-piège DMV (vega-neutralité en richesse), reproduction des primes SPX réelles du 28/06/2024 à ±0,5 %
+- [✅] **Fork tranché (notebook 04, 8 juil.) : primes = `impl_premium`** (ré-extraction vsurfd — BS naïf biaisé de ±5 %, q implicite SPX 1,04 % identique call/put, couverture 100 % dès 1996) ; **grecques = BS/Black-76 analytiques** depuis IV + forward (`fwdprd`/parité call-put) + `zerocd` (README §8bis)
+- [✅] **Fork tranché (8 juil.) : marquage QUOTIDIEN par interpolation de surface** (piliers < 91j, linéaire en variance totale à delta fixé) — delta-hedge quotidien effectif, P&L décomposable (vega/gamma/theta), séries quotidiennes pour le ML S4 ; holding-period DMV dispo par agrégation (benchmark) ; marquage à IV constante exclu (le P&L d'une stratégie de vol EST vega×ΔIV)
+- [✅] **Rebuild groupé du dataset (8 juil., 2 passes ~10 min)** : `surface.parquet` (4,9 M lignes, piliers 10/30/60/91j, 0 NaN, 0 doublon) + `spots.parquet` (724k closes secprd + cfadj, 169/329 titres avec splits, SPX vérifié) + `rates.parquet` (zerocd) + `returns.parquet` (329 permnos dès 1995) + durcissements §9bis + fix des queues tronquées. Non-régression : 5 parquets bit-identiques ; signal modifié sur 139 jours (≤ 8e-3, politique documentée enfin appliquée) ; headline inchangé (+0.079, t=7.4). Découvertes QA : pilier 10j peuplé ~37 % (règle de repli sous 30j à poser au design engine) ; zerocd absent 10 j/7281 (ffill à la consommation).
+
+- [✅] **Forks engine tranchés (8 juil., README §7.3)** : sizing = **richesse DMV** (comparabilité Table II — à justifier dans la thèse) ; delta-hedge = **indice seul quotidien** (cohérence one-factor + coûts ~0,5–2 bps vs 100 lignes actions — à justifier dans la thèse) ; échéance = **règlement intrinsèque** au rebal. suivant (±3 j documenté) ; marquage < 30j = **σ(30j) du jour** (règle homogène) ; approximation **ATM-proxy** documentée (primes réelles + payoff ⇒ second ordre sur le cumulé)
 
 ### Règles & réalisme
-- [ ] Règle d'entrée (seuil de spread) pour v1, sortie/roll, gestion du roll à l'échéance
-- [ ] Coûts de transaction — leçon DMV Table V : **1er ordre** (rendement ÷2, alpha mort). Convention : bid-to-maturity (jambes vendues) / ask-to-maturity (jambes achetées), spread payé une fois.
-- [ ] ⏸ Fork en suspens : vrais bid/ask `opprcd` (lourd, matching 91j↔contrats listés) vs spread paramétrique calibré sur échantillon `opprcd` + sensibilité
+- [✅] **v1 EXÉCUTÉE (8 juil.)** — seuil = **quantile ex-ante glissant** (option A : médiane du signal sur l'historique disponible, warm-up 12 rebal., zéro look-ahead ; `exante_quantile_threshold`) : 58/115 trimestres tradés. Résultats : prime par trimestre TRADÉ améliorée (+7,9 % vs +7,3 % v0) → le signal a de l'info sur la prime ; **esquive Q3-2024 (+1,4 % vs −41 %), été 2002 et les trimestres Lehman** ; coupe la stratégie post-2020 (17/20 derniers trimestres sautés = la compression du notebook 03 en action) ; **MAIS trade le Q1-2018** (signal au-dessus de sa médiane fin 2017 : le spread mesure la richesse de la prime, PAS le danger) → maxDD inchangé, Sharpe global 0,56 < 0,77 (moitié du temps en cash). **Conclusion : le seuil time la prime, pas le risque — argument quantitatif exact pour le ML S4 (cible = régimes de spike, features de niveau de vol/spectrales).** Sensibilité q ∈ {0,25 ; 0,75} → robustesse S5. Sortie/roll : règlement intrinsèque (§7.3)
+- [✅] **Fork coûts tranché (8 juil., notebook 05, README §8bis)** : grille **paramétrique calibrée sur vrais quotes opprcd** (3 groupes SPX / rnk 1-50 / rnk 51-100 × interpolation linéaire 1996→2024 : 1→0,6 % / 7→1,2 % / 10→3 %) ; **½-spread × prime par jambe à l'entrée** (spread payé une fois, convention DMV held-to-maturity) + **1 bp** sur le notionnel de chaque trade de hedge ; règlement sans spread. Raw opprcd rejeté : artefact EOD SPX 2012 (quoted ≠ effective, ~30-50 % du coté) + cellule COVID 2020. Conservateur par construction. Sensibilité ±50 % + « stress ×2 » → S5
+- [✅] **NETS EXÉCUTÉS (8 juil.) — la Table V de DMV se réplique sur nos 29 ans** : v0 net = +4,0 %/trim (brut +7,3 %, ÷1,8), **Sharpe 0,77 → 0,42 (DMV : 0,73 → 0,41)**, cumul ×165 → ×2,5 (~3 %/an net, marginal) ; coût ~3,3 %/trimestre tradé ; **v1 net morte (×1,1, Sharpe 0,33)** — la porte sélectionne les époques à spreads larges (coût 3,0 % vs 2,7 %). Narratif limits-to-arbitrage complet + barre chiffrée pour le ML S4. Sorties : `backtest_{v0,v1}_net_*.parquet`
 
 ### Métriques
-- [ ] Sharpe, Sortino, Max Drawdown, P&L cumulé
-- [ ] Décomposition du P&L par source (vega, gamma, theta, correlation)
-- [ ] **Sanity vs benchmarks DMV** (README §8bis) : poids ~−100/+101/−32,5, ratio 0,58, Sharpe ~0,73 brut / 0,41 net, β≈0 — écart massif = chasse au bug avant interprétation
-- [ ] Stats : **Newey–West (~63 lags)** sur toute série chevauchante
+- [✅] Sharpe, Sortino, MaxDD, P&L cumulé, t-stats (notebook 06 → `results/tables/table_s3_metrics.csv`) : v0 brut t=4,11 ; **v0 net t=2,24 (encore significatif)** ; v1 net t=1,79 (marginal)
+- [✅] **Décomposition du P&L par source** (ledger, additive) : tous trimestres = jambe indice +8,3 % / composants −2,4 % / hedge +1,2 % ; **crises (12/115) = hedge −23,0 %** (le canal variance réalisée/gamma) + indice −14,3 %, règlement +8,2 % — mappe sur (theta+vega = jambes, gamma/corrélation réalisée = hedge) ; granularité grecque fine = raffinement S5 si utile
+- [✅] **Sanity DMV** (`table_s3_dmv_sanity.csv`) : Σy +99,5 % vs +101,12 % ✓ ; Sharpe 0,77/0,42 vs 0,73/0,41 ✓ ; skew négatif ✓ ; hedge d'entrée quasi delta-neutre (+0,3 %, |.| 5 %) — le −32,54 % DMV (1 mois, statique) non directement comparable, documenté
+- [✅] Stats : t simples sur trimestres non chevauchants ; NW réservé aux séries quotidiennes (S5)
 
-**Livrable :** courbe de P&L cumulé v0 (benchmark DMV) + v1 (signal) + tableau de métriques. **C'est le cœur notable du projet.**
+**Livrable :** ✅ `results/figures/fig_backtest_s3.png` (NAV log 4 variantes, crises annotées) + `results/tables/table_s3_{metrics,dmv_sanity}.csv` + notebook 06. **SEMAINE 3 TERMINÉE** (8 juil. — 11 jours d'avance sur le calendrier).
 
 **Piège :** Delta-neutre ne suffit pas → surveiller le Vega-convexity (Volga).
 
@@ -140,11 +145,11 @@
 
 | Semaine | Dates | Cœur |
 |---|---|---|
-| 1 | 25 juin → 2 juil | Setup + Données point-in-time |
-| 2 | 3 → 9 juil | Théorie + Corrélation implicite |
-| 3 | 10 → 16 juil | Backtest baseline |
-| 4 | 17 → 23 juil | RMT (+ ML léger) |
-| 5 | 24 → 31 juil | Robustesse + Rédaction |
+| 1 | 29 juin → 5 juil | Setup + Données point-in-time |
+| 2 | 6 → 12 juil | Théorie + Corrélation implicite |
+| 3 | 13 → 19 juil | Backtest baseline |
+| 4 | 20 → 26 juil | RMT (+ ML léger) |
+| 5 | 27 juil → 2 août | Robustesse + Rédaction |
 
 ---
 

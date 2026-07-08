@@ -69,6 +69,9 @@ def implied_correlation(
     s2 = g["s2_raw"] / g["w_sum"] ** 2  # renormalised diagonal term
 
     sig_i = iv_index.set_index("date")["iv_atm"].reindex(g.index)
+    n_missing = int(sig_i.isna().sum())
+    if n_missing:  # guard: a silent NaN here would masquerade as a coverage-floor day
+        raise ValueError(f"{n_missing} component-IV dates have no index IV — inconsistent inputs")
     rho = (sig_i ** 2 - s2) / (s1 ** 2 - s2)
     rho[g["n_names"] < n_min] = np.nan  # coverage floor (guard — never hit so far)
 
@@ -107,6 +110,12 @@ def build_signal(
     rho = implied_correlation(iv_comp, weights, iv_index, n_min=n_min)
 
     spine = rcorr.set_index("date").sort_index()  # master calendar
+    lost = rho.index.difference(spine.index)
+    extra = spine.index.difference(rho.index)
+    if len(lost) or len(extra):  # guard: the right-join must be lossless (verified invariant)
+        raise ValueError(
+            f"calendar mismatch: {len(lost)} rho dates off-spine, {len(extra)} spine dates without rho"
+        )
     sig = rho.join(spine[["rho_bar"]], how="right").sort_index()
     sig = sig.rename(columns={"rho_bar": "rho_trailing"})
     sig["rho_forward"] = sig["rho_trailing"].shift(-horizon)
