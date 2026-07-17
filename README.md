@@ -590,15 +590,33 @@ net results are an honest lower bound. Week-5 sensitivity: grid ±50% and a "str
 
 ### RMT specification update (Week 4)
 
-The stored 63-day matrices ($q=N/T\approx1.6$, singular) are unusable for spectral filtering. RMT
-operates on **252-day** windows ($q\approx0.4$):
+**Notation (decided, Week 4):** in RMT sections and code, the Marchenko–Pastur aspect ratio is
+written **`q_mp` = N/T** (Bouchaud–Potters convention); the plain letter $q$ keeps meaning the
+dividend yield in all pricing contexts (`utils/greeks.py`, `engine.py`). Week-4 design decisions:
+EWMA de-volatilisation with **λ = 0.94** (RiskMetrics; sensitivity λ ∈ {0.90, 0.97} in Week 5);
+cleaned matrices computed **daily** (needed for the daily $\bar\rho_{\text{rmt}}$ variant and for
+spectral-dynamics features); re-injection runs **both** paths — a full `signal_rmt` variant
+re-backtested against the baseline (role A; the 252-vs-91-day horizon mismatch is documented as an
+estimator variant) *and* the spectral features for the ML layer (role B). The Laloux correction is
+**part of the cleaning pipeline** (it sets the clipping edge), not a separate estimator — there is
+one $\bar\rho_{\text{rmt}}$, Laloux-corrected by construction; a naive-edge variant is at most a
+Week-5 robustness line.
+
+The stored 63-day matrices ($q_{mp}\approx1.6$, singular) are unusable for spectral filtering. RMT
+operates on **252-day** windows ($q_{mp}\approx0.4$):
 de-volatilise (EWMA) + standardise → diagonalise → effective MP edge with the **Laloux correction**
 $\lambda_+^{\text{eff}} = (1-\lambda_1/N)(1+\sqrt{q})^2$ → clip the bulk to a constant **preserving the
 trace** → renormalise (diag = 1, PSD guaranteed). Unit tests: diag/PSD/trace + **iid-simulation test**
 (empirical spectrum ≈ MP density; filter ≈ identity). Role A: de-noised $\bar\rho_{\text{realised}}$;
 Role B: spectral ML features ($\lambda_1/N$, absorption ratio, $K$ = #eigenvalues > $\lambda_+$,
-$\Delta\lambda_1$, dominant-eigenvector rotation). Also to explore: a **parsimonious leg** (use the
-spectral structure to trade fewer names → less spread paid — the RMT answer to frictions). The
+$\Delta\lambda_1$, dominant-eigenvector rotation). **ML layer (enriched, 17 Jul):** regime
+identification via **GMM** (soft calm/stress/crisis probabilities on the spectral+vol features,
+upgrading the initially planned K-Means) and a **Gaussian HMM** (temporal regime persistence +
+transition matrix; strictly ex-ante **filtered** probabilities — forward algorithm only, never
+smoothed, and walk-forward expanding fits to avoid look-ahead), compared against supervised XGBoost
+under purged walk-forward; the trading gate is P(spike regime) > threshold. Also to explore: a
+**parsimonious leg** (use the spectral structure to trade fewer names → less spread paid — the RMT
+answer to frictions). The
 **dual-window justification** (63d = window-matching of the priced horizon; 252d = spectral health)
 goes in the report. Refs: Bun, Bouchaud & Potters (2017, arXiv:1610.08104); Potters & Bouchaud (2020).
 

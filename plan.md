@@ -99,21 +99,26 @@
 **Objectif :** la couche de valeur ajoutée quantitative.
 
 ### RMT (prioritaire) — spec figée le 8 juil. (README §8bis), module `src/dispersion/rmt/`
-- [ ] ⏸ Fork en suspens : ajouter `returns.parquet` au build (long : date, permno, ret — requis pour matrices 252j + features spectrales) ; schéma exact à trancher en début de S4
-- [ ] Matrices de corrélation **252j** (q=N/T≈0,4 sain — les 63j stockées sont singulières, q≈1,6, spectre dégénéré) + spectre de valeurs propres
-- [ ] Superposer Marchenko–Pastur ; λ₊ **effectif** avec correction Laloux : (1−λ₁/N)(1+√q)²
-- [ ] Pipeline : dévolatilisation EWMA + standardisation → diagonalisation → clipping du bulk en λ̄ (**trace préservée**) → renormalisation (diag=1, PSD garantie)
-- [ ] Tests unitaires : diag=1, PSD, trace + **test iid simulé** (histogramme ≈ densité MP ; filtre ≈ identité)
-- [ ] Rôle A : ρ̄_realized débruitée → réinjecter dans le spread, re-backtester vs baseline
+- [✅] `returns.parquet` : fait en S3 (rebuild groupé anticipé — 329 permnos, buffer 1995)
+- [✅] **Forks étape 0 tranchés (17 juil.)** : notation `q_mp` = N/T (code + note README ; `q` reste le dividende dans le pricing) ; dévol **EWMA λ=0,94** (RiskMetrics, sensibilité S5) ; matrices nettoyées **quotidiennes** ; réinjection = **les deux voies** (variante signal_rmt complète re-backtestée + features spectrales pour le ML) ; Laloux = partie intégrante du pipeline (fixe le bord de clipping), pas d'estimateur séparé
+- [✅] **Étape 1 (17 juil., notebook 07)** : matrices 252j dévolatilisées (EWMA 0,94) aux 116 rebalancements — q_mp médian 0,397, N_eff ≈ 100 ; **λ₁/N médiane 33,5 %** [17 % fin 2017 → 54 % mi-2012] ; spectre vs MP : le bulk colle à la densité **avec σ² = 1−λ₁/N** (Laloux) ; **K médian = 7 au bord Laloux vs 4 au bord naïf** (le bord naïf, trop haut de ~35 %, RATE ~3 facteurs sectoriels/trimestre — démonstration chiffrée de la correction) ; **test iid : K = 0**, bords exacts, trace 1.0000 (le pipeline n'invente rien) ; aperçu clipping : ρ̄_clean vs ρ̄_raw corr 0,998, |Δ| médiane 0,011 (max 0,024) → **le scalaire bouge peu comme anticipé** (λ₁ préservé) — l'effort RMT portera sur features + jambe parcimonieuse. Figure : `fig_mp_spectrum.png`
+- [✅] **Étape 2 (17 juil.) — module `src/dispersion/rmt/cleaning.py`** : `devolatilise` (EWMA 0,94, σ prévisible shift-1), `corr_window` (252j complete-case, min 200 obs/60 noms), `laloux_clip` (bord effectif → clipping trace-preserving → renorm diag=1) avec diagnostics (q_mp, λ₁/N, K, bords, témoin de trace), `spectral_features` (λ₁/N, K, absorption top-5, v1 signé pour la rotation)
+- [✅] **Tests (6, suite 31/31)** : iid → K=0 + quasi-identité (off-diag ÷20+) ; diag/PSD/trace sur données corrélées ; **équicorrélation exacte → le nettoyage ne déforme PAS la vraie structure** (diff < 1e-10) ; invariance d'échelle en log ; panel trop mince → None ; cohérence features/clip
+- [✅] **Étape 3 — Rôle A EXÉCUTÉ (17 juil.)** : `rmt/daily.py` (`build_rmt_daily` 61 s → `rmt_daily.parquet` 7221 j × [ρ̄ raw/clean 252j, λ₁/N, K, absorption, Δλ₁, rotation] ; `build_signal_rmt` → `signal_rmt.parquet`) ; corr(signal_base, signal_rmt) = 0,40. **v1_rmt (porte médiane ex-ante sur signal_rmt) : Sharpe brut 0,80 (v1 : 0,56), skew +1,28 (POSITIF vs −1,45), maxDD −51,7 % (vs −95,9 %), esquive LES TROIS crashs dont le Volmageddon ; net : Sharpe 0,56 > barre 0,42, skew +0,80, cumul ×12,4.** 39/115 désaccords de porte vs v1.
+- [✅] **ABLATION D'ATTRIBUTION (le garde-fou « ne pas sur-vendre la RMT »)** : la même porte sur la trailing 252j BRUTE fait 0,78 / skew +1,31 / mêmes crashs esquivés (2 désaccords/115 vs nettoyée) → **le moteur est la FENÊTRE 252j (ancre lente de régime), le clipping n'ajoute que ~+0,02 de Sharpe sur ce canal**. La valeur RMT se joue sur les features (rôle B/ML) et la jambe parcimonieuse — à écrire tel quel dans la thèse. Intégrité : 0 skip forcé par NaN aux rebalancements (85 j NaN = churn mi-trimestre 2001/2009/2016).
+- [✅] **Audit adversarial look-ahead du chemin RMT (agent indépendant, 17 juil.) : AUCUNE fuite** — EWMA prévisible (invariance bit-à-bit aux perturbations futures), fenêtres bornées à t (convention identique à la baseline), shift(−63) exact, porte reconstruite = 115/115 décisions du run, quantile ex-ante inclusif = 0/115 décision changée. **2 défauts trouvés et CORRIGÉS** : ① colonne `premium` de signal_rmt **invalidée** (trailing 252j vs son shift-63 = 75 % d'observations partagées, corr signal/premium 0,876 — contamination mécanique, ne JAMAIS l'utiliser en validation ; le premium de thèse reste le 63j window-matché de la base) ; ② **bord MP à T nominal au lieu de T effectif** (complete-case T_eff ∈ [200,252] sur ~⅓ des jours → k_signal gonflé de ~1 ; du bruit iid à T_eff=201 passé comme 252 montrait K=2) → fix : `corr_window` retourne T_eff, bord calculé dessus + test de régression ; + fallback silencieux des vols remplacé par échec bruyant. Suite : 34/34. Consigné : mélange d'estimateurs (corr dévolatilisée × vols brutes — variante assumée, à écrire), features rotation/Δλ₁ trouées les 85 j de churn (à documenter pour le ML).
 - [ ] Explorer la **jambe parcimonieuse** (structure spectrale → moins de noms → moins de spread payé = réponse RMT aux frictions DMV)
 - [ ] Justifier les **deux fenêtres** dans le rapport (63j = window-matching de l'horizon pricé ; 252j = santé du spectre)
 - [ ] Réfs : Bun–Bouchaud–Potters 2017 (arXiv 1610.08104), Potters–Bouchaud 2020
 
-### ML (bonus, seulement si la RMT est bouclée)
-- [ ] Features **spectrales** (rôle B de la RMT) : λ₁/N, absorption ratio, K (nb λ > λ₊), Δλ₁, rotation du vecteur propre dominant + VIX, vol réalisée, lags
+### ML (enrichi le 17 juil. — on a le temps : régimes via HMM/GMM en plus du supervisé)
+- [ ] Features **spectrales** (rôle B de la RMT) : λ₁/N, absorption ratio, K (nb λ > λ₊^eff), Δλ₁, rotation du vecteur propre dominant + VIX/vol réalisée, lags
 - [ ] Cible : régimes de **spike de corrélation** → couper le short-corr (objectif : skew/drawdown, pas le rendement moyen = « n'entrer que si edge prédit > coût »)
-- [ ] XGBoost + validation walk-forward avec purging/embargo (anti data-leakage)
-- [ ] (Si vraiment du temps) K-Means pour régimes calme/stress/crise
+- [ ] **GMM** sur les features (régimes non supervisés, probabilités souples calme/stress/crise) — remplace le K-Means initialement prévu (probabilités + covariances vs distances dures)
+- [ ] **HMM gaussien** : persistance temporelle des régimes + matrice de transition ; ⚠ probabilités **filtrées** (forward, strictement ex-ante), PAS lissées (Baum-Welch smoothing = look-ahead) ; fit en walk-forward expanding
+- [ ] **XGBoost supervisé** en comparaison + validation walk-forward avec purging/embargo (anti data-leakage, LdP ch. 7)
+- [ ] Porte de trading : P(régime spike) > seuil → couper ; tableau comparatif v1-seuil / GMM / HMM / XGBoost vs la barre (Sharpe net 0,42, queues coupées)
+- [ ] ⏸ Au DÉMARRAGE de la partie ML : présenter le **menu d'améliorations ML possibles** (demande utilisateur du 17 juil.) avant de coder
 
 **Livrable :** graphe du spectre + tableau comparatif baseline vs RMT (et vs ML si fait).
 
