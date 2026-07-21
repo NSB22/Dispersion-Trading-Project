@@ -10,26 +10,13 @@ import wrds
 
 
 def get_universe(db: wrds.Connection, date: str, n: int = 100) -> pd.DataFrame:
-    """
-    Return the top-N S&P 500 constituents by market cap on `date`, point-in-time.
+    """Top-N S&P 500 constituents by market cap on `date`, point-in-time.
 
-    Only constituents with a score-1 OptionMetrics link are included (ensures
-    a clean secid<->permno mapping with no ambiguity).
+    Only names with a score-1 OptionMetrics link are kept, so each permno maps
+    to exactly one secid.
 
-    Parameters
-    ----------
-    db   : open wrds.Connection
-    date : rebalancing date as 'YYYY-MM-DD'
-    n    : universe size (default 100)
-
-    Returns
-    -------
-    DataFrame with columns:
-        permno       – CRSP permanent identifier
-        secid        – OptionMetrics security id
-        market_cap   – USD market cap on `date`
-        weight       – cap weight renormalised within the top-N universe
-        rnk          – rank by market cap (1 = largest)
+    Columns: permno, secid, market_cap (USD on `date`), weight (cap weight
+    renormalised within the top-N), rnk (rank by cap, 1 = largest).
     """
     query = f"""
     WITH members AS (
@@ -40,7 +27,7 @@ def get_universe(db: wrds.Connection, date: str, n: int = 100) -> pd.DataFrame:
     ),
     capi AS (
         -- market cap = abs(prc) * shrout * 1000
-        -- prc can be negative in CRSP (bid/ask average convention)
+        -- CRSP prc can be negative (it's a bid/ask midpoint)
         SELECT d.permno,
                ABS(d.prc) * d.shrout * 1000 AS market_cap
         FROM crsp.dsf d
@@ -50,8 +37,8 @@ def get_universe(db: wrds.Connection, date: str, n: int = 100) -> pd.DataFrame:
           AND d.shrout IS NOT NULL
     ),
     ranked AS (
-        -- ROW_NUMBER, not RANK: an exact cap tie at rank N would otherwise admit >N rows
-        -- (never observed in 116 rebalances — audit §9bis); permno = deterministic tiebreak
+        -- ROW_NUMBER not RANK: with RANK a cap tie at rank N would let in >N rows.
+        -- permno breaks ties deterministically.
         SELECT permno, market_cap,
                ROW_NUMBER() OVER (ORDER BY market_cap DESC, permno) AS rnk
         FROM capi
@@ -60,9 +47,8 @@ def get_universe(db: wrds.Connection, date: str, n: int = 100) -> pd.DataFrame:
         SELECT * FROM ranked WHERE rnk <= {n}
     ),
     link AS (
-        -- score=1 only (CUSIP+ticker+date match). A permno can have several valid
-        -- score-1 links with overlapping windows -> keep one (latest edate) to
-        -- guarantee a unique secid per permno.
+        -- score=1 only. A permno can have several overlapping score-1 links;
+        -- keep the latest edate so secid is unique per permno.
         SELECT DISTINCT ON (permno) permno, secid
         FROM wrdsapps_link_crsp_optionm.opcrsphist
         WHERE score = 1 AND sdate <= '{date}' AND edate >= '{date}'

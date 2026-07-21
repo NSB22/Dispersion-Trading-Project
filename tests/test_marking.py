@@ -1,5 +1,5 @@
 """
-Unit tests for dispersion.backtest.marking (mark-to-surface rules, README §7.3).
+Tests for dispersion.backtest.marking: the mark-to-surface rules.
 """
 import numpy as np
 import pandas as pd
@@ -20,11 +20,11 @@ def test_exact_at_pillars():
 
 def test_linear_in_total_variance_between_pillars():
     s30, s60, s91 = 0.30, 0.25, 0.22
-    # tau = 45: w = (w30 + w60)/2 by linearity, sigma = sqrt(w/45)
+    # tau = 45 sits halfway between the 30 and 60 pillars in total variance
     w30, w60 = s30**2 * 30, s60**2 * 60
     expected = np.sqrt(((w30 + w60) / 2) / 45)
     assert interp_sigma(s30, s60, s91, 45) == pytest.approx(expected, rel=1e-12)
-    # tau = 75.5 (midpoint of [60, 91])
+    # tau = 75.5, midpoint of [60, 91]
     w91 = s91**2 * 91
     expected = np.sqrt(((w60 + w91) / 2) / 75.5)
     assert interp_sigma(s30, s60, s91, 75.5) == pytest.approx(expected, rel=1e-12)
@@ -42,8 +42,8 @@ def test_vectorised_and_nan_propagation():
     s91 = np.array([0.22, 0.22, 0.33])
     out = interp_sigma(s30, s60, s91, np.array([45.0, 45.0, 20.0]))
     assert out.shape == (3,)
-    assert np.isnan(out[1])            # NaN pillar propagates
-    assert out[2] == pytest.approx(0.40)  # frozen short end per element
+    assert np.isnan(out[1])            # a NaN pillar propagates to the output
+    assert out[2] == pytest.approx(0.40)  # short end frozen element by element
 
 
 # --------------------------------------------------------------------------- #
@@ -62,19 +62,19 @@ def test_rate_exact_and_interpolated():
     assert rc.rate("2020-01-02", 91) == pytest.approx(0.02, abs=1e-12)
     # midpoint of [30, 91]
     assert rc.rate("2020-01-02", 60.5) == pytest.approx(0.015, abs=1e-12)
-    # clamped beyond the grid
+    # off the ends of the grid -> clamped
     assert rc.rate("2020-01-02", 10) == pytest.approx(0.01, abs=1e-12)
     assert rc.rate("2020-01-02", 400) == pytest.approx(0.03, abs=1e-12)
 
 
 def test_rate_bounded_ffill_and_loud_failure():
     rc = RateCurve(_toy_rates(), max_stale_days=7)
-    # 2020-01-03 missing -> uses 01-02 curve (1 day stale, within bound)
+    # 01-03 has no curve, so reuse 01-02 (1 day stale, within bound)
     assert rc.rate("2020-01-03", 91) == pytest.approx(0.02, abs=1e-12)
-    # far beyond the staleness bound -> loud failure
+    # past the staleness bound -> raise rather than use a stale curve
     with pytest.raises(KeyError):
         rc.rate("2020-02-01", 91)
-    # before the first curve -> loud failure
+    # before the first curve -> raise
     with pytest.raises(KeyError):
         rc.rate("2019-12-31", 91)
 
@@ -83,11 +83,11 @@ def test_rate_bounded_ffill_and_loud_failure():
 # adjust_strike — split handling via cfadj
 # --------------------------------------------------------------------------- #
 def test_adjust_strike_split():
-    # 2:1 split: cfadj 1 -> 2, price scale halves, so the fixed strike halves too
+    # 2:1 split: cfadj goes 1 -> 2, price halves, so the strike halves too
     assert adjust_strike(100.0, 1.0, 2.0) == pytest.approx(50.0)
-    # no split: unchanged
+    # no split leaves the strike alone
     assert adjust_strike(100.0, 1.0, 1.0) == pytest.approx(100.0)
-    # settlement consistency: |S - K| is split-invariant once both are rebased
+    # once both are rebased, |S - K| is unchanged by the split
     S_pre, K_pre = 120.0, 100.0
     S_post, cf_e, cf_t = 60.0, 1.0, 2.0
     K_post = adjust_strike(K_pre, cf_e, cf_t)

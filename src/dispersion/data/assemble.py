@@ -1,9 +1,5 @@
-"""
-Assemble the clean backtest dataset into aligned parquet files.
-
-Orchestrates universe / IV / returns / realized vol / realized correlation over the
-full period, applies the agreed cleaning policy, and writes tidy (long) parquet files
-to data/processed/.
+"""Build the clean backtest dataset: pull each piece, align to one calendar,
+apply the cleaning rules, and write the parquets to data/processed/.
 
 Usage:
     from dispersion.data.assemble import build_dataset
@@ -67,13 +63,12 @@ def build_dataset(
     returns_start: str = "1995-01-01",
     out_dir: str | None = "data/processed",
 ) -> dict[str, pd.DataFrame]:
-    """
-    Build and (optionally) save the clean backtest dataset. Returns a dict of DataFrames.
+    """Build and optionally save the clean backtest dataset; returns a dict of DataFrames.
 
-    Deliverables: iv_index, iv_components, weights, realized_vol, realized_corr,
-    corr_matrices (signal-grade, cleaned) + surface, rates, returns (marking/RMT-grade,
-    stored raw — README §8bis). `returns_start` predates `date_start` so the 252-day
-    RMT windows (Week 4) are warm from the first rebalance.
+    Writes iv_index, iv_components, weights, realized_vol, realized_corr,
+    corr_matrices (cleaned, signal-grade) plus surface, rates, returns (marking/
+    RMT grade, stored raw). `returns_start` predates `date_start` so the 252-day
+    RMT windows have warm history from the first rebalance.
     """
 
     # --- 1. SPX IV (the index leg) + master calendar + rebalance schedule -----
@@ -83,7 +78,7 @@ def build_dataset(
     rebals = _rebalance_dates(calendar)
 
     iv_index = iv_index[iv_index["date"].isin(calendar)].drop(columns="secid")
-    # bounded ffill on the index series (no outlier clipping on the index)
+    # bounded ffill on the index series; no outlier clipping on the index
     iv_index = (
         iv_index.set_index("date").reindex(calendar).ffill(limit=ffill_limit).reset_index(names="date")
     )
@@ -92,7 +87,7 @@ def build_dataset(
     weights_rows, iv_comp_parts, vol_parts, rho_rows, corr_mat_parts = [], [], [], [], []
     surface_parts, spot_parts = [], []
 
-    # full active window per rebalance (also reused by the cleaning step — §9bis tail fix)
+    # active window per rebalance; the cleaning step reuses this too
     active_by_reb: dict[pd.Timestamp, pd.DatetimeIndex] = {}
     for i, reb in enumerate(rebals):
         nxt = rebals[i + 1] if i + 1 < len(rebals) else calendar[-1] + pd.Timedelta(days=1)
@@ -133,7 +128,7 @@ def build_dataset(
             surf.insert(0, "rebalance_date", reb)
             surface_parts.append(surf)
 
-        # daily spots (marking/settlement-grade; same split convention as the strikes)
+        # daily spots (same split convention as the strikes)
         sp = get_spots(db, secids, str(active[0].date()), str(active[-1].date()))
         if not sp.empty:
             sp["date"] = pd.to_datetime(sp["date"])
@@ -168,7 +163,7 @@ def build_dataset(
             if C is None:
                 rho_rows.append((d, np.nan, np.nan))
                 continue
-            if d not in vols[63].index:  # no silent stale-row fallback (audit §9bis)
+            if d not in vols[63].index:  # skip rather than fall back to a stale vol row
                 rho_rows.append((d, np.nan, np.nan))
                 continue
             vols_d = vols[63].loc[d]
@@ -240,9 +235,8 @@ def build_dataset(
     iv_components = pd.concat(iv_comp_parts, ignore_index=True)
     lo, hi = iv_components["iv_atm"].quantile(list(iv_pct))
     iv_components.loc[(iv_components["iv_atm"] < lo) | (iv_components["iv_atm"] > hi), "iv_atm"] = np.nan
-    # bounded ffill per (quarter, permno) on the FULL active window of the quarter
-    # (not the name's last observed date: trailing gaps are materialised as NaN and the
-    #  ≤ ffill_limit extension beyond the last observation applies — audit §9bis tail fix)
+    # ffill per (quarter, permno) over the full active window, not just up to the
+    # name's last observation — so trailing gaps stay NaN, extended at most ffill_limit days
     cleaned = []
     for (reb, _), g in iv_components.groupby(["rebalance_date", "permno"]):
         active = active_by_reb[reb]

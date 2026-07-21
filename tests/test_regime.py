@@ -1,6 +1,6 @@
 """
-Causality tests for dispersion.ml.regime — the HMM filtered posterior must use
-ONLY past+present observations (the user's explicit look-ahead concern).
+Causality tests for dispersion.ml.regime: the HMM filtered posterior must use
+only past and present observations, never the future.
 """
 import numpy as np
 import pytest
@@ -16,7 +16,7 @@ def _fit_hmm(X, seed=0):
 
 
 def test_filtered_posterior_is_causal():
-    # perturbing the FUTURE must leave every past filtered posterior bit-identical
+    # perturbing the future must leave every past filtered posterior unchanged
     rng = np.random.default_rng(1)
     X = rng.standard_normal((400, 4))
     m = _fit_hmm(X)
@@ -24,11 +24,11 @@ def test_filtered_posterior_is_causal():
 
     t0 = 250
     X2 = X.copy()
-    X2[t0 + 1:] += 5.0 * rng.standard_normal((len(X) - t0 - 1, 4))   # nuke the future
+    X2[t0 + 1:] += 5.0 * rng.standard_normal((len(X) - t0 - 1, 4))   # scramble the future
     post2 = hmm_filtered_posterior(m, X2)
 
     assert np.allclose(post[:t0 + 1], post2[:t0 + 1], atol=1e-12)     # past unchanged
-    assert not np.allclose(post[t0 + 1:], post2[t0 + 1:])             # future did move
+    assert not np.allclose(post[t0 + 1:], post2[t0 + 1:])             # future did change
 
 
 def test_filtered_rows_are_probabilities():
@@ -40,8 +40,8 @@ def test_filtered_rows_are_probabilities():
 
 
 def test_filtered_equals_truncated_smoothed_at_last_step():
-    # filtered posterior at time t == smoothed posterior of the sequence TRUNCATED
-    # at t (no future obs => smoothing degenerates to filtering) — cross-check vs hmmlearn
+    # filtered posterior at t equals the smoothed posterior of the sequence cut off
+    # at t (no future left to smooth over) -- cross-checked against hmmlearn
     rng = np.random.default_rng(3)
     X = rng.standard_normal((120, 4))
     m = _fit_hmm(X)

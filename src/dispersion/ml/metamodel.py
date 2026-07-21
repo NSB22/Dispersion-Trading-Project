@@ -1,17 +1,7 @@
 """
-Meta-model + veto (steps ④-⑤): predict each quarter's dispersion-trade return
-from the features, walk-forward with purge+embargo, then VETO the trades the
-meta-model expects in the bad tail. On top of the v1_rmt primary gate.
-
-Pre-registered (plan.md): shptallow XGBoost with FIXED conservative hyper-params
-(no CV tuning on ~12 crises), purge = 63 trading days (label horizon) + embargo =
-21 days, veto if predicted return < ex-ante EXPANDING 33rd percentile of past
-predictions. Central test compares feature sets:
-  A "VIX only"      : f_vix, f_term_slope, f_regime_vix
-  B "VIX + spectral": A + f_lam1, f_dlam1_63, f_turb21, f_k, f_rot21, f_regime
-  Full              : the 10 features + f_regime (adds f_vrp, f_drho_imp_21, f_sig_rmt)
-
-Sample is tiny (~90 quarterly predictions, ~12 crises) — report with uncertainty.
+Predict each quarter's trade return, walk-forward and purged, then veto the
+trades in the bad tail. Sits on top of the v1_rmt gate. Sample is small
+(~90 quarters), so read the results with that in mind.
 
 Usage:
     from dispersion.ml.metamodel import run_central_test
@@ -28,7 +18,7 @@ from .regime import regime_probs
 
 HORIZON, EMBARGO = 63, 21          # trading days
 MIN_TRAIN = 24                     # quarters before the first prediction (~6y)
-VETO_PCTILE = 0.33                 # veto the bottom third of predicted returns (ex-ante)
+VETO_PCTILE = 0.33                 # veto the bottom third of predicted returns
 
 XGB_PARAMS = dict(objective="reg:squarederror", max_depth=2, n_estimators=100,
                   learning_rate=0.05, subsample=0.8, colsample_bytree=0.8,
@@ -44,13 +34,13 @@ FEATURE_SETS = {
 
 
 def _snapshots(processed_dir):
-    """Feature snapshot at each rebalance close + the quarter's v0 trade return (label)."""
+    """Features at each rebalance close, joined to the quarter's v0 return as the label."""
     ml = pd.read_parquet(os.path.join(processed_dir, "ml_dataset.parquet"))
     ml["date"] = pd.to_datetime(ml["date"])
     q0 = pd.read_parquet(os.path.join(processed_dir, "backtest_v0_quarterly.parquet"))
     q0["rebalance_date"] = pd.to_datetime(q0["rebalance_date"])
 
-    # add the VIX-only regime variant (fit on vol features only — keeps the central test clean)
+    # VIX-only regime variant, fit on vol features only so the A feature set stays pure
     weights = pd.read_parquet(os.path.join(processed_dir, "weights.parquet"))
     weights["rebalance_date"] = pd.to_datetime(weights["rebalance_date"])
     rebals = sorted(weights["rebalance_date"].unique())
@@ -65,14 +55,14 @@ def _snapshots(processed_dir):
 
 def walk_forward_predict(snap: pd.DataFrame, features: list) -> pd.Series:
     """
-    Expanding walk-forward prediction of y at each rebalance, training only on
-    quarters whose label horizon + embargo ends before the test date (purge).
+    Walk-forward prediction of y at each rebalance. Only trains on quarters whose
+    label horizon plus embargo ends before the test date, so no future leaks in.
     """
     dates = snap["date"].to_numpy()
     yhat = pd.Series(np.nan, index=snap.index)
     for i in range(len(snap)):
         test_date = snap["date"].iloc[i]
-        cutoff = test_date - pd.Timedelta(days=int((HORIZON + EMBARGO) * 7 / 5))  # td->cal
+        cutoff = test_date - pd.Timedelta(days=int((HORIZON + EMBARGO) * 7 / 5))  # trading days -> calendar
         train = snap.iloc[:i][snap["date"].iloc[:i] <= cutoff]
         train = train.dropna(subset=features + ["y"])
         if len(train) < MIN_TRAIN:
@@ -88,7 +78,7 @@ def walk_forward_predict(snap: pd.DataFrame, features: list) -> pd.Series:
 
 
 def _veto_mask(yhat: pd.Series) -> pd.Series:
-    """Veto quarter i if yhat_i < ex-ante expanding VETO_PCTILE of past predictions."""
+    """Veto quarter i if its prediction is below the expanding VETO_PCTILE of past predictions."""
     veto = pd.Series(False, index=yhat.index)
     hist = []
     for i in range(len(yhat)):
@@ -101,11 +91,11 @@ def _veto_mask(yhat: pd.Series) -> pd.Series:
 
 
 def predictive_metrics(snap, yhat, crisis_q=0.10):
-    """Directional accuracy + precision/recall of the veto on crisis quarters."""
+    """Directional accuracy, plus precision and recall of the veto on crisis quarters."""
     m = snap.assign(yhat=yhat.to_numpy()).dropna(subset=["yhat", "y"])
     if len(m) < MIN_TRAIN:
         return {}
-    crisis = m["y"] <= m["y"].quantile(crisis_q)          # ex-post worst quarters (eval only)
+    crisis = m["y"] <= m["y"].quantile(crisis_q)          # worst quarters ex-post, used only to score the veto
     veto = _veto_mask(pd.Series(m["yhat"].to_numpy(), index=m.index)).to_numpy()
     tp = int((veto & crisis.to_numpy()).sum())
     fp = int((veto & ~crisis.to_numpy()).sum())
@@ -121,7 +111,7 @@ def predictive_metrics(snap, yhat, crisis_q=0.10):
 
 
 def feature_importance(snap, features):
-    """Mean XGBoost gain importance over a few expanding folds (interpretability)."""
+    """Mean XGBoost gain importance across a few expanding folds."""
     imp = np.zeros(len(features))
     n = 0
     for cut in (0.5, 0.7, 0.9):
@@ -138,7 +128,7 @@ def feature_importance(snap, features):
 
 
 def run_central_test(processed_dir: str = "data/processed"):
-    """Full ④-⑤: predictions, veto, backtests (gross+net) for A/B/Full + references."""
+    """Run predictions, veto, and gross+net backtests for each of the A/B/Full feature sets."""
     snap = _snapshots(processed_dir)
     signal_rmt = pd.read_parquet(os.path.join(processed_dir, "signal_rmt.parquet"))
     weights = pd.read_parquet(os.path.join(processed_dir, "weights.parquet"))
@@ -156,7 +146,7 @@ def run_central_test(processed_dir: str = "data/processed"):
         veto_dates = set(snap.loc[veto.to_numpy(), "date"])
         thr = v1rmt_thr.copy()
         for d in veto_dates:
-            thr[pd.Timestamp(d)] = 1e9                     # force-skip vetoed quarters
+            thr[pd.Timestamp(d)] = 1e9                     # unreachable threshold -> skip the quarter
         res = {}
         for tag, kw in [("gross", {}), ("net", dict(costs={}))]:
             bt = run_backtest(data={**{k: v.copy() for k, v in base.items()},

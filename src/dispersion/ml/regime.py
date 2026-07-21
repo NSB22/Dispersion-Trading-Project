@@ -1,25 +1,15 @@
 """
-Regime-probability feature (step ③bis, stacking) — walk-forward, strictly causal.
+Daily danger-regime probability from a GMM and a filtered HMM on the core stress
+features, both refit walk-forward at each rebalance. The danger state is named
+from the training window only, and the HMM uses the filtered (forward-pass)
+posterior rather than the smoothed one, so nothing looks ahead. The feature is
+the mean of the two probabilities. Causality is checked in tests/test_regime.py.
 
-Two unsupervised models on the core stress features, refit walk-forward at each
-rebalance on the expanding training window:
-- GMM (3 components): pointwise posterior P(danger component) — naturally causal.
-- Gaussian HMM (3 states): **FILTERED** posterior via a transparent forward pass
-  (never the smoothed Baum-Welch posterior, which peeks at the whole sequence).
-
-The "danger" state/component is named by the highest TRAINING-WINDOW composite
-stress centroid (mean across the core features) — no forward-looking label
-touches the regime model, so look-ahead is neutralised (user's explicit
-concern). Danger probability is the ensemble mean of the two probabilities.
-
-Causality is enforced by construction and checked in tests/test_regime.py
-(perturbing future observations leaves past filtered probabilities bit-identical).
-
-Usage:
     from dispersion.ml.regime import build_regime_feature
     build_regime_feature()      # adds regime probs to ml_dataset.parquet
 """
 import os
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -28,18 +18,17 @@ from scipy.special import logsumexp
 from sklearn.mixture import GaussianMixture
 
 CORE = ["f_lam1", "f_dlam1_63", "f_turb21", "f_vix"]
-# All core features are oriented "higher = more stress" (correlation concentration,
-# correlation rising, turbulence, vol level), so the danger state is named by the
-# highest COMPOSITE standardised centroid — label-free and not hostage to a single
-# axis. (Turbulence alone fails: EWMA devol flattens it — notebook diagnostic.)
+# every core feature is oriented "higher = more stress", so we name the danger
+# state by the highest composite centroid instead of any single axis (turbulence
+# alone doesn't work — EWMA devol flattens it)
 WARMUP = 756                      # ~3y of complete core rows before the first fit
 N_STATES = 3
 
 
 def hmm_filtered_posterior(model: GaussianHMM, X: np.ndarray) -> np.ndarray:
     """
-    Filtered posterior P(state_t | obs_1..t) via an explicit forward pass — uses
-    ONLY past and present observations at every t (causal). Returns (T, K).
+    Filtered posterior P(state_t | obs_1..t) via a forward pass — at each t it
+    only uses observations up to t, never later ones. Returns (T, K).
     """
     logB = model._compute_log_likelihood(X)          # (T, K) log emission probs
     log_pi = np.log(model.startprob_ + 1e-300)
@@ -56,9 +45,9 @@ def hmm_filtered_posterior(model: GaussianHMM, X: np.ndarray) -> np.ndarray:
 
 def _danger_index(centroids: np.ndarray) -> int:
     """
-    Danger = the component/state with the highest COMPOSITE standardised centroid
-    (mean across the core features, all oriented higher = more stress). Centroids
-    are already in training z-score units, so the plain mean is comparable.
+    Danger = the component/state whose centroid has the highest mean across the
+    core features. Centroids are already in training z-score units, so a plain
+    mean is comparable across features.
     """
     return int(np.argmax(centroids.mean(axis=1)))
 
@@ -66,10 +55,9 @@ def _danger_index(centroids: np.ndarray) -> int:
 def regime_probs(feat: pd.DataFrame, rebals, core=CORE, warmup: int = WARMUP,
                  seed: int = 0):
     """
-    Walk-forward causal danger probabilities for a given core feature subset.
-    `feat` is date-indexed with (at least) the `core` columns. Returns
-    (p_gmm, p_hmm) Series aligned to feat.index. Used for both the full-core
-    regime feature and the VIX-only variant of the central test.
+    Walk-forward danger probabilities for a core feature subset. `feat` is
+    date-indexed with at least the `core` columns. Returns (p_gmm, p_hmm) aligned
+    to feat.index — used for both the full-core feature and the VIX-only variant.
     """
     feat = feat[core]
     p_gmm = pd.Series(np.nan, index=feat.index)
@@ -131,7 +119,10 @@ def build_regime_feature(
     out = ml.copy()
     out["f_reg_gmm"] = p_gmm.to_numpy()
     out["f_reg_hmm"] = p_hmm.to_numpy()
-    out["f_regime"] = np.nanmean(np.c_[p_gmm.to_numpy(), p_hmm.to_numpy()], axis=1)
+    with warnings.catch_warnings():
+        # warm-up rows are NaN in both models -> nanmean warns on those; ignore it
+        warnings.simplefilter("ignore", RuntimeWarning)
+        out["f_regime"] = np.nanmean(np.c_[p_gmm.to_numpy(), p_hmm.to_numpy()], axis=1)
     num = [c for c in out.columns if c != "date"]
     out[num] = out[num].astype("float64")
 

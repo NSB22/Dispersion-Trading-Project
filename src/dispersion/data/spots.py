@@ -1,11 +1,9 @@
-"""
-Daily spot prices from OptionMetrics `secprd` (vendor-consistent with vsurfd strikes).
+"""Daily spot prices from OptionMetrics `secprd`.
 
-Marking and intrinsic settlement need |S - K| with S and K on the SAME split
-convention: `secprd` is the price series OptionMetrics builds the surface from,
-so `impl_strike` and these closes share it. A mid-quarter split is handled with
-`cfadj` (cumulative adjustment factor): K_t = K_entry * cfadj_entry / cfadj_t,
-with the position quantity scaled by cfadj_t / cfadj_entry.
+`secprd` is the price series OptionMetrics builds the surface from, so its closes
+share the split convention of `impl_strike`. Marking and intrinsic settlement
+need S and K on the same convention (|S - K|); mid-quarter splits are handled
+with `cfadj`.
 
 Usage:
     from dispersion.data.spots import get_spots
@@ -21,13 +19,7 @@ def get_spots(
     date_start: str,
     date_end: str,
 ) -> pd.DataFrame:
-    """
-    Close price + cumulative split-adjustment factor per (secid, date).
-
-    Returns
-    -------
-    Tidy DataFrame: secid, date, close, cfadj.
-    """
+    """Close price + cumulative split-adjustment factor per (secid, date)."""
     secid_list = ",".join(str(int(s)) for s in secids)
     y0, y1 = int(date_start[:4]), int(date_end[:4])
 
@@ -48,5 +40,5 @@ def get_spots(
     if spots.empty:
         return pd.DataFrame(columns=["secid", "date", "close", "cfadj"])
 
-    spots["close"] = spots["close"].abs()  # defensive: midpoint convention can sign prices
+    spots["close"] = spots["close"].abs()  # close can be signed (midpoint convention); take abs
     return spots.sort_values(["secid", "date"]).reset_index(drop=True)

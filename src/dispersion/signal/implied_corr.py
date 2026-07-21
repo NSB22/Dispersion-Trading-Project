@@ -1,16 +1,11 @@
 """
-Implied correlation, correlation-risk premium and dispersion signal.
+Implied correlation, the correlation-risk premium, and the dispersion signal.
 
-Inverts the one-factor index-variance identity (DMV 2009, eq. 2) on ATM 91-day
-IVs — the same functional form as the realised rho-bar (option B), so the
-spread is apples-to-apples — then builds the two window-matched series:
+Inverts the one-factor index-variance identity on ATM 91-day IVs to get an
+implied rho, then builds two series against the realised rho-bar:
 
-    premium(t) = rho_implied(t) - rho_trailing(t + horizon)    (ex-post validation)
-    signal(t)  = rho_implied(t) - rho_trailing(t)              (ex-ante, tradeable)
-
-Implementation choices (README §5.1): daily weight renormalisation over the
-names with a valid IV (+ coverage floor), raw values stored (no clipping).
-Validated in notebooks/03_implied_correlation.ipynb.
+    premium(t) = rho_implied(t) - rho_trailing(t + horizon)    # ex-post check
+    signal(t)  = rho_implied(t) - rho_trailing(t)              # ex-ante, tradeable
 
 Usage:
     from dispersion.signal.implied_corr import build_signal
@@ -32,19 +27,11 @@ def implied_correlation(
     Daily implied correlation from the one-factor inversion.
 
     rho_implied = (sigma_I^2 - S2) / (S1^2 - S2), with S1 = sum(w_hat * sigma)
-    and S2 = sum(w_hat^2 * sigma^2) over the names with a valid IV that day,
-    where w_hat renormalises the frozen rebalance weights over that set.
+    and S2 = sum(w_hat^2 * sigma^2) over the names with a valid IV that day;
+    w_hat renormalises the frozen rebalance weights over that set.
 
-    Parameters
-    ----------
-    iv_components : long frame [rebalance_date, date, permno, secid, iv_atm]
-    weights       : long frame [rebalance_date, permno, weight, ...]
-    iv_index      : frame [date, iv_atm] (SPX leg)
-    n_min         : coverage floor — the day is invalidated below n_min names
-
-    Returns
-    -------
-    DataFrame indexed by date with columns [rho_implied, n_names].
+    n_min sets a coverage floor: days with fewer valid names are dropped.
+    Returns a frame indexed by date with [rho_implied, n_names].
     """
     m = iv_components.merge(
         weights[["rebalance_date", "permno", "weight"]],
@@ -70,10 +57,10 @@ def implied_correlation(
 
     sig_i = iv_index.set_index("date")["iv_atm"].reindex(g.index)
     n_missing = int(sig_i.isna().sum())
-    if n_missing:  # guard: a silent NaN here would masquerade as a coverage-floor day
+    if n_missing:  # a NaN here would look like a coverage-floor day, not an input mismatch
         raise ValueError(f"{n_missing} component-IV dates have no index IV — inconsistent inputs")
     rho = (sig_i ** 2 - s2) / (s1 ** 2 - s2)
-    rho[g["n_names"] < n_min] = np.nan  # coverage floor (guard — never hit so far)
+    rho[g["n_names"] < n_min] = np.nan  # coverage floor
 
     return pd.DataFrame(
         {"rho_implied": rho.astype("float64"), "n_names": g["n_names"].astype("Int64")}
@@ -87,12 +74,11 @@ def build_signal(
     out_file: str | None = "signal.parquet",
 ) -> pd.DataFrame:
     """
-    Assemble the full signal table and (optionally) write it to parquet.
+    Build the full signal table and optionally write it to parquet.
 
-    Columns: date, rho_implied, rho_trailing, rho_forward, premium, signal,
-    n_names. rho_forward(t) = rho_trailing shifted back `horizon` rows of the
-    master calendar (window-matching; the shift crosses the Aug-2020 vendor
-    gap, documented).
+    rho_forward(t) is rho_trailing shifted back `horizon` rows so it lines up
+    with the implied window. Columns: date, rho_implied, rho_trailing,
+    rho_forward, premium, signal, n_names.
     """
     iv_index = pd.read_parquet(os.path.join(processed_dir, "iv_index.parquet"))
     iv_comp = pd.read_parquet(os.path.join(processed_dir, "iv_components.parquet"))
@@ -112,7 +98,7 @@ def build_signal(
     spine = rcorr.set_index("date").sort_index()  # master calendar
     lost = rho.index.difference(spine.index)
     extra = spine.index.difference(rho.index)
-    if len(lost) or len(extra):  # guard: the right-join must be lossless (verified invariant)
+    if len(lost) or len(extra):  # the right-join must be lossless
         raise ValueError(
             f"calendar mismatch: {len(lost)} rho dates off-spine, {len(extra)} spine dates without rho"
         )

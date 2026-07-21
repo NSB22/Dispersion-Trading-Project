@@ -1,18 +1,10 @@
 """
-Daily RMT series — role A (cleaned rho-bar variant of the signal) and
-role B (spectral regime features for the ML layer). README §8bis.
+Daily RMT series: a cleaned rho-bar variant of the signal plus spectral regime
+features for the ML layer. Builds rmt_daily.parquet and signal_rmt.parquet.
 
-Outputs:
-- rmt_daily.parquet  : date, rho_rmt_raw, rho_rmt_clean, lam1_share, k_signal,
-                       absorption_top, d_lam1, rotation, n_names_rmt
-- signal_rmt.parquet : same schema as signal.parquet, with the RMT-cleaned 252d
-                       trailing leg. ⚠ The `premium` column is kept for schema
-                       compatibility ONLY: a 252d trailing shifted by 63 rows
-                       shares ~75% of its observations with itself, so that
-                       column is mechanically contaminated and MUST NOT be used
-                       as ex-post validation (adversarial audit, 17 Jul). The
-                       thesis premium measure stays the baseline 63d one. Only
-                       `signal` (tradeable, strictly ex-ante) is consumed.
+signal_rmt keeps a `premium` column only to match signal.parquet's schema —
+don't use it. A 252d trailing leg shifted by 63 rows overlaps itself ~75%, so
+that premium is mechanically contaminated; only `signal` is safe to trade on.
 
 Usage:
     from dispersion.rmt.daily import build_rmt_daily, build_signal_rmt
@@ -31,9 +23,9 @@ from .cleaning import (EWMA_LAMBDA, MIN_OBS, T_WIN, corr_window, devolatilise,
 
 def _rotation(v1: pd.Series, v1_prev: pd.Series | None) -> float:
     """
-    Day-to-day rotation of the dominant eigenvector: 1 - |<v1_t, v1_{t-1}>| on
-    the common-name subspace (each subvector renormalised to unit length).
-    NaN when no previous vector or no overlap.
+    Day-to-day rotation of the dominant eigenvector: 1 - |<v1_t, v1_{t-1}>| over
+    the common names (each subvector renormalised). NaN with no previous vector
+    or no overlap.
     """
     if v1_prev is None:
         return np.nan
@@ -84,21 +76,21 @@ def build_rmt_daily(
                 rows.append((d,) + (np.nan,) * 12 + (0,))
                 v1_prev, lam1_prev = None, np.nan
                 continue
-            C, t_eff = res                              # effective T -> honest MP edge
+            C, t_eff = res                              # effective T for the MP edge
             C_clean, diag = laloux_clip(C, t_win=t_eff)
             feats, v1 = spectral_features(C, t_win=t_eff)
 
             kept = C.columns
             w_kept = wmap.reindex(kept)
-            s_kept = sig252.loc[d, kept]                # loud KeyError if d missing — no stale row
+            s_kept = sig252.loc[d, kept]                # KeyError if d is missing, rather than a stale row
             rho_raw = average_correlation(C, w_kept, s_kept, "weighted")
             rho_clean = average_correlation(C_clean, w_kept, s_kept, "weighted")
 
-            # cross-name dispersion of average correlation (structure heterogeneity)
+            # cross-name dispersion of average correlation
             A = C.to_numpy(dtype="float64")
             corr_xdisp = float(np.std(A.mean(axis=1)))
-            # Mahalanobis turbulence on the CLEANED inverse — the operation where
-            # RMT cleaning genuinely matters (inverting a noisy C is unstable)
+            # Mahalanobis turbulence on the cleaned inverse — inverting a noisy C
+            # is where cleaning actually matters
             zrow = z.loc[d, kept].to_numpy(dtype="float64")
             mask = np.isfinite(zrow)
             if mask.sum() >= 30:
@@ -130,9 +122,8 @@ def build_signal_rmt(
     out_file: str | None = "signal_rmt.parquet",
 ) -> pd.DataFrame:
     """
-    Estimator-variant of the signal: the trailing realised leg is the
-    RMT-cleaned 252d rho-bar. Same schema/column names as signal.parquet so the
-    engine gate and the ex-ante threshold helper work unchanged.
+    Signal variant whose trailing realised leg is the RMT-cleaned 252d rho-bar.
+    Same columns as signal.parquet so the engine gate works unchanged.
     """
     sig = pd.read_parquet(os.path.join(processed_dir, "signal.parquet"))
     rmt = pd.read_parquet(os.path.join(processed_dir, "rmt_daily.parquet"))

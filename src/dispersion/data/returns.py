@@ -19,23 +19,13 @@ def get_returns(
     date_start: str,
     date_end: str,
 ) -> pd.DataFrame:
-    """
-    Daily total returns (dividend- and split-adjusted) for given CRSP securities.
+    """Daily total returns (dividend- and split-adjusted) for the given permnos.
 
-    Pure data extraction. `ret` is CRSP's holding-period return: it already accounts
-    for dividends, splits and other distributions — no manual price adjustment needed.
+    CRSP `ret` is a holding-period return, so dividends and splits are already
+    baked in — no manual price adjustment.
 
-    Parameters
-    ----------
-    db          : open wrds.Connection
-    permnos     : list of CRSP permno identifiers
-    date_start  : 'YYYY-MM-DD' inclusive
-    date_end    : 'YYYY-MM-DD' inclusive
-
-    Returns
-    -------
-    Wide DataFrame: index = date, columns = permno, values = simple daily return.
-    Calendars are aligned across securities (NaN where a security did not trade).
+    Wide DataFrame: index = date, columns = permno, values = daily return; NaN
+    where a security did not trade.
     """
     permno_list = ",".join(str(int(p)) for p in permnos)
     q = f"""
@@ -58,20 +48,11 @@ def realized_vol(
     returns: pd.DataFrame,
     windows: tuple[tuple[int, int], ...] = ((21, 17), (63, 50)),
 ) -> dict[int, pd.DataFrame]:
-    """
-    Rolling annualised realized volatility per security, for each window.
+    """Rolling annualised realized vol per security, one DataFrame per window.
 
-    Uses log-returns ln(1+ret); a window value is NaN unless it has >= min_obs
-    valid observations (guards against unstable estimates on sparse history).
-
-    Parameters
-    ----------
-    returns : wide simple-return panel from get_returns (date x permno)
-    windows : tuple of (window_length, min_obs) pairs (trading days)
-
-    Returns
-    -------
-    dict {window_length: wide DataFrame of annualised vol (date x permno)}
+    Uses log-returns; a window is NaN until it has at least `min_obs`
+    observations. `windows` is a tuple of (length, min_obs) pairs in trading days.
+    Returns dict {window_length: wide DataFrame (date x permno)}.
     """
     log_ret = np.log1p(returns)
     out = {}
@@ -88,30 +69,20 @@ def realized_corr_matrix(
     min_obs: int = 50,
     method: str = "listwise",
 ) -> pd.DataFrame | None:
-    """
-    Realized correlation matrix over the `window` days ending at `end_date`.
+    """Realized correlation matrix over the `window` days ending at `end_date`.
 
-    Parameters
-    ----------
-    returns  : wide simple-return panel from get_returns (date x permno)
-    end_date : last date of the window (inclusive)
-    window   : window length in trading days
-    min_obs  : minimum valid observations required
-    method   : 'listwise' (complete-case -> PSD matrix, default) or 'pairwise'
-
-    Returns
-    -------
-    N x N correlation DataFrame (index/columns = permno), or None if insufficient data.
+    `method` is 'listwise' (complete-case rows -> PSD) or 'pairwise'. Returns an
+    N x N DataFrame (index/columns = permno), or None if there isn't enough data.
     """
     log_ret = np.log1p(returns)
     win = log_ret.loc[:end_date].tail(window)
-    # drop securities with insufficient coverage in this window
+    # drop names with too few obs in the window
     win = win.loc[:, win.notna().sum() >= min_obs]
     if win.shape[1] < 2:
         return None
 
     if method == "listwise":
-        win = win.dropna(axis=0, how="any")  # complete-case rows -> PSD
+        win = win.dropna(axis=0, how="any")  # keep only complete rows so it stays PSD
         if len(win) < min_obs:
             return None
         corr = win.corr()
@@ -128,24 +99,15 @@ def average_correlation(
     vols: pd.Series,
     method: str = "weighted",
 ) -> float:
-    """
-    Collapse a correlation matrix into a single average correlation rho-bar.
+    """Collapse a correlation matrix into a single average correlation rho-bar.
 
-    'weighted' (default) is the formula-consistent average that appears in the index
+    'weighted' (default) is the formula-consistent average from the index
     variance decomposition (matches the implied-correlation definition):
         rho_bar = (v' R v - sum v_i^2) / ((sum v_i)^2 - sum v_i^2),  v_i = w_i * sigma_i
     'equal' is the plain mean of off-diagonal pairwise correlations.
 
-    Parameters
-    ----------
-    corr    : N x N correlation matrix (index/columns = permno)
-    weights : cap weights (Series indexed by permno) — frozen rebalance weights
-    vols    : realized vols sigma_i (Series indexed by permno), same date as the window
-    method  : 'weighted' (default) or 'equal'
-
-    Returns
-    -------
-    rho_bar (float), or NaN if not computable.
+    `weights` are the frozen rebalance cap weights; `vols` are realized sigma_i on
+    the window's end date. Returns NaN if not computable.
     """
     permnos = corr.index
     w = weights.reindex(permnos)

@@ -1,19 +1,10 @@
 """
-Week-4 experimental levers (parallel to the main ML — nothing here overwrites it).
+Two experimental vetoes that sit alongside the main ML, neither overwrites it.
 
-Lever 1 — DAILY spike target: predict the forward correlation spike
-    y_spike(t) = rho_trail63(t+63) − rho_trail63(t)
-on ~7,000 daily rows (vs ~90 quarterly trade-return rows), walk-forward with
-purge 63d + embargo 21d. The spike is more predictable than the trade return
-(correlation is persistent) and it is the actual loss channel. Gate: veto the
-trade if the predicted spike at the rebalance is in the high (dangerous) tail.
-
-Lever 3 — REGIME-ONLY gate: no supervised model at all — veto if the causal
-regime probability f_regime at the rebalance is in the high tail.
-
-Both are meta-labelling vetoes ON TOP of the v1_rmt primary gate, for a clean
-comparison. Pre-registered veto = ex-ante expanding 67th percentile (veto the
-top third of predicted danger).
+Lever 1 predicts the forward correlation spike on daily data and vetoes a trade
+when the spike predicted at the rebalance is in the high tail. Lever 3 skips the
+model entirely and vetoes on the regime probability instead. Both layer on top
+of the v1_rmt gate.
 
 Usage:
     from dispersion.ml.experiments import run_levers
@@ -30,7 +21,7 @@ from ..backtest.engine import exante_quantile_threshold, run_backtest
 
 HORIZON, EMBARGO = 63, 21
 MIN_TRAIN_DAYS = 756
-VETO_Q = 0.67                      # veto the top third of predicted danger (ex-ante)
+VETO_Q = 0.67                      # veto the top third of predicted danger
 
 SPIKE_FEATS = ["f_vix", "f_term_slope", "f_lam1", "f_dlam1_63", "f_turb21", "f_k",
                "f_rot21", "f_vrp", "f_drho_imp_21", "f_sig_rmt", "f_regime"]
@@ -41,10 +32,10 @@ XGB = dict(objective="reg:squarederror", max_depth=3, n_estimators=200,
 
 def predict_spike_daily(processed_dir="data/processed", features=SPIKE_FEATS):
     """
-    Walk-forward daily spike prediction: refit at each rebalance on the expanding
-    daily history (purged), predict that quarter's days. Returns (yhat_at_reb dict,
-    oos_corr) where oos_corr = corr(predicted spike, realised spike) over all
-    out-of-sample days — the key 'is the spike predictable?' number.
+    Walk-forward daily spike prediction. Refit at each rebalance on the purged
+    expanding history, then predict that quarter's days. Returns the prediction at
+    each rebalance and oos_corr, the correlation between predicted and realised
+    spike over all out-of-sample days (tells you whether the spike is predictable).
     """
     ml = pd.read_parquet(os.path.join(processed_dir, "ml_dataset.parquet"))
     weights = pd.read_parquet(os.path.join(processed_dir, "weights.parquet"))
@@ -65,11 +56,11 @@ def predict_spike_daily(processed_dir="data/processed", features=SPIKE_FEATS):
             continue
         m = XGBRegressor(**XGB).fit(tr[features].to_numpy("float64"),
                                     tr["y_spike"].to_numpy("float64"))
-        # gate value at the rebalance
+        # value used by the gate at the rebalance
         row = idx.loc[[reb], features] if reb in idx.index else None
         if row is not None and row.notna().all(axis=1).iloc[0]:
             yhat_reb[reb] = float(m.predict(row.to_numpy("float64"))[0])
-        # OOS predictive check on the quarter's days
+        # out-of-sample check on the quarter's days
         seg = ml[(ml["date"] >= reb) & (ml["date"] < nxt)].dropna(subset=features + ["y_spike"])
         if not seg.empty:
             p = m.predict(seg[features].to_numpy("float64"))
@@ -80,7 +71,7 @@ def predict_spike_daily(processed_dir="data/processed", features=SPIKE_FEATS):
 
 
 def _high_veto(vals_at_reb: dict, q=VETO_Q, warmup=MIN_TRAIN_DAYS // 21) -> set:
-    """Veto rebalances whose value exceeds the ex-ante expanding q-quantile."""
+    """Veto rebalances whose value is above the expanding q-quantile of past values."""
     dates = sorted(vals_at_reb)
     veto, hist = set(), []
     for d in dates:
@@ -101,7 +92,7 @@ def _stats(q, d):
 
 
 def run_levers(processed_dir="data/processed"):
-    """Backtest lever 1 (spike) and lever 3 (regime-only) vs v1_rmt. Writes outputs."""
+    """Backtest lever 1 (spike) and lever 3 (regime-only) against v1_rmt, and write the outputs."""
     ml = pd.read_parquet(os.path.join(processed_dir, "ml_dataset.parquet"))
     signal_rmt = pd.read_parquet(os.path.join(processed_dir, "signal_rmt.parquet"))
     weights = pd.read_parquet(os.path.join(processed_dir, "weights.parquet"))
@@ -113,7 +104,7 @@ def run_levers(processed_dir="data/processed"):
             for kk in ("surface", "spots", "rates", "weights")}
     v1rmt_thr = exante_quantile_threshold(signal_rmt, rebals, q=0.5, warmup=12)
 
-    # lever 3: regime at rebalances
+    # lever 3: regime probability at each rebalance
     reg_at = {pd.Timestamp(r): float(ml.loc[ml["date"] == pd.Timestamp(r), "f_regime"].iloc[0])
               for r in rebals if (ml["date"] == pd.Timestamp(r)).any()
               and np.isfinite(ml.loc[ml["date"] == pd.Timestamp(r), "f_regime"].iloc[0])}

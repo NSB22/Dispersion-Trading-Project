@@ -1,15 +1,8 @@
 """
-DispersionEngine — dispersion backtest, unconditional v0 and signal-gated v1.
+Dispersion backtest: short the SPX straddle, long a vega-matched basket of
+component straddles, delta-hedge the index daily. v0 trades every quarter; v1
+gates on the signal.
 
-Frozen design (README §7.3): DMV wealth sizing (short 100% of wealth in the SPX
-straddle), vega-neutrality to PROPORTIONAL vol shocks (sum y_i nu_i sigma_i =
-nu_I sigma_I — for ATM straddles nu ~ 1/sigma so sum y_i ~ 1, matching DMV's
-+101.12%), daily index-only delta hedge, daily mark-to-surface (ATM proxy,
-sigma(30d) frozen below 30d), intrinsic settlement at the next rebalance
-(maturity ≡ next rebalance, ±3d documented), entry at real vendor premiums
-(impl_premium), splits handled via cfadj, cash accrues at the short zerocd rate.
-
-Usage:
     from dispersion.backtest.engine import run_backtest
     res = run_backtest()                    # v0 (unconditional)
     res = run_backtest(threshold=0.05)      # v1 (trade only if signal > threshold)
@@ -28,10 +21,9 @@ SPX_SECID = 108105
 PILLARS = (30, 60, 91)
 ACT = 365.0
 
-# Transaction-cost grid (README §8bis, notebook 05): QUOTED relative bid-ask
-# spreads (% of premium), linear in time between the 1996 and 2024 anchors,
-# clamped outside. Entry pays half of it per leg (impl_premium is mid-like);
-# the daily index hedge pays `hedge_bps` of traded notional; settlement is free.
+# Quoted relative bid-ask spreads (% of premium), linear between the 1996 and
+# 2024 anchors, clamped outside. Entry pays half per leg (impl_premium is
+# mid-like); the daily index hedge pays `hedge_bps` of notional; settlement is free.
 COST_ANCHORS = {"spx": (0.010, 0.006),     # SPX options
                 "large": (0.070, 0.012),   # constituents ranked 1-50
                 "small": (0.100, 0.030)}   # constituents ranked 51-100
@@ -51,9 +43,8 @@ def parametric_spread(year: int, group: str) -> float:
 def implied_q(S, k_call, k_put, sig_call, sig_put, T, r, c_mkt, p_mkt,
               lo=-0.10, hi=0.25) -> float:
     """
-    Entry dividend yield backed out of the vendor premiums via the C - P
-    difference (monotone in q, well-conditioned near ATM). Falls back to 0.0
-    if no root in [lo, hi].
+    Dividend yield backed out of the vendor premiums via C - P (monotone in q).
+    Falls back to 0.0 if there's no root in [lo, hi].
     """
     def cp_diff(q):
         c = bs_price(S, k_call, sig_call, T, r, q, "C")
@@ -69,10 +60,9 @@ def implied_q(S, k_call, k_put, sig_call, sig_put, T, r, c_mkt, p_mkt,
 def exante_quantile_threshold(signal: pd.DataFrame, rebalances, q: float = 0.5,
                               warmup: int = 12) -> pd.Series:
     """
-    Per-rebalance ex-ante threshold (v1, README §8): at each rebalance, the
-    quantile `q` of the DAILY signal history available up to that date
-    (expanding window — no look-ahead). The first `warmup` rebalances get NaN,
-    which the engine treats as "trade unconditionally" (v0 behaviour).
+    Per-rebalance ex-ante threshold for v1: quantile `q` of the daily signal
+    history up to that date (expanding window, so no look-ahead). The first
+    `warmup` rebalances get NaN, which the engine reads as "trade every quarter".
     """
     s = signal.copy()
     s["date"] = pd.to_datetime(s["date"])
@@ -94,7 +84,7 @@ def _entry_leg(rows, cp):
 
 
 class _Position:
-    """One straddle position (fixed strikes, fixed entry q-hat, split-aware)."""
+    """One straddle: fixed strikes, fixed entry q-hat, split-aware."""
 
     __slots__ = ("secid", "qty0", "cfadj0", "k_call", "k_put", "q_hat",
                  "last_mark", "last_greeks", "frozen_days")
@@ -130,15 +120,16 @@ def run_backtest(
     costs: dict | None = None,
     cash_tenor: float = 10.0,
     min_names: int = 80,
+    n_leg: int | None = None,
 ) -> dict:
     """
-    Run the dispersion backtest over every rebalance. `threshold=None` -> v0
-    (always trade); a float or a per-rebalance pd.Series gates the quarters (v1).
-    `costs=None` -> gross; `costs={}` or DEFAULT_COSTS -> net of the parametric
-    spread grid (+ hedge_bps on hedge notional; optional 'scale' multiplier).
-    `data` may inject the input frames directly (tests); else read parquets.
+    Run the backtest over every rebalance.
 
-    Returns dict(daily=DataFrame, quarterly=DataFrame, ledger=DataFrame).
+    threshold=None -> v0 (always trade); a float or per-rebalance pd.Series gates
+    the quarters (v1). costs=None -> gross; costs={} or DEFAULT_COSTS -> net of the
+    parametric spreads (plus hedge_bps on hedge notional; optional 'scale'). `data`
+    injects the input frames directly for tests, otherwise they're read from parquet.
+    Returns dict(daily, quarterly, ledger).
     """
     if data is None:
         data = {k: pd.read_parquet(os.path.join(processed_dir, f"{k}.parquet"))
@@ -171,19 +162,18 @@ def run_backtest(
         spot_q = spots[spots["rebalance_date"] == reb]
         w_q = weights[weights["rebalance_date"] == reb]
 
-        # pivots for the quarter: sigma pillars per (secid, cp, days); spot close/cfadj
+        # quarter pivots: sigma pillars per (secid, cp, days); spot close/cfadj
         piv_iv = surf_q.pivot_table(index="date", columns=["secid", "cp_flag", "days"],
                                     values="iv", aggfunc="first").astype("float64")
         piv_close = spot_q.pivot_table(index="date", columns="secid", values="close",
                                        aggfunc="first").astype("float64")
         piv_cfadj = spot_q.pivot_table(index="date", columns="secid", values="cfadj",
                                        aggfunc="first").astype("float64")
-        # float64 casts: nullable dtypes leak pd.NA through .at lookups, and
-        # np.isfinite(pd.NA) is ambiguous — NaN is what the freeze guards expect
+        # force float64 — nullable dtypes leak pd.NA and break np.isfinite
         dates = piv_close.index.sort_values()
 
-        # gate: None -> v0; float -> fixed threshold; pd.Series -> per-rebalance
-        # ex-ante threshold (NaN entries = warm-up -> trade unconditionally)
+        # gate: None -> v0; float -> fixed threshold; Series -> per-rebalance
+        # threshold (NaN = warm-up -> trade)
         if threshold is None:
             traded = True
         else:
@@ -233,13 +223,19 @@ def run_backtest(
 
             w_map = w_q.dropna(subset=["secid"]).set_index("secid")["weight"]
             held = [s for s in entries if s in w_map.index]
+            # only trade the top n_leg names by cap weight; w_til renormalises over
+            # them so the leg stays vega-neutral. Fewer, larger legs -> fewer
+            # spreads, and tight large-cap spreads replace the wide small-cap tail.
+            if n_leg is not None and len(held) > n_leg:
+                held = w_map.loc[held].sort_values(ascending=False).head(n_leg).index.tolist()
             held_n = len(held)
-            if held_n < min_names:
+            floor = min(n_leg, 10) if n_leg is not None else min_names
+            if held_n < floor:
                 raise ValueError(f"only {held_n} names with entry premiums at {reb.date()}")
 
             w_til = w_map.loc[held] / w_map.loc[held].sum()
             denom = sum(w_til[s] * entries[s]["nu"] * entries[s]["sig_bar"] for s in held)
-            lam = idx_e["nu"] * idx_e["sig_bar"] / denom      # proportional-shock neutrality
+            lam = idx_e["nu"] * idx_e["sig_bar"] / denom      # vega-neutral to a proportional shock
             y = {s: lam * w_til[s] for s in held}
             y_sum = float(sum(y.values()))
 
@@ -253,7 +249,7 @@ def run_backtest(
                                       entries[s]["kp"], entries[s]["qh"], entries[s]["price"]))
                 cash -= y[s] * W
 
-            if use_costs:  # half the quoted spread per entry leg (README §8bis)
+            if use_costs:  # pay half the quoted spread on each entry leg
                 rnk_map = w_q.dropna(subset=["secid"]).set_index("secid")["rnk"] \
                     if "rnk" in w_q.columns else pd.Series(dtype=float)
                 c_entry_q = 0.5 * cost_scale * parametric_spread(reb.year, "spx") * W

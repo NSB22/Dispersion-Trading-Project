@@ -1,0 +1,8 @@
+variant,Sharpe,skew,maxDD,trades
+"BASE (gate 0.5, veto 0.67, cost x1.0)",0.571,0.998,-0.524,39
+cost x0.5,0.67,1.27,-0.48,39
+cost x1.5,0.461,0.661,-0.566,39
+regime veto q=0.50,0.578,1.314,-0.524,33
+regime veto q=0.80,0.568,0.883,-0.524,42
+v1_rmt gate q=0.40,0.543,0.512,-0.534,50
+v1_rmt gate q=0.60,0.562,1.3,-0.48,35

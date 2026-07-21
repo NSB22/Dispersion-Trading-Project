@@ -627,7 +627,7 @@ meta-labeling veto** — the primary signal (v1_rmt gate) proposes the trade, th
 when the predicted correlation spike is too high; retained enhancements: continuous spike label
 $y(t)=\bar\rho^{63}_{t+63}-\bar\rho^{63}_t$ (training only, purged), cost-aware gate (trade only if
 predicted edge > the era's §8bis cost), GMM/HMM/XGB probability ensembling, isotonic calibration;
-CPCV + Deflated Sharpe deferred to Week 5. The full protocol (features, label, hyperparameter grids,
+CPCV deferred to Week 5. The full protocol (features, label, hyperparameter grids,
 purge 63d + embargo 21d, filtered-only HMM probabilities, the net-Sharpe 0.42 bar) is
 **pre-registered in plan.md before any result was computed**. Also to explore: a
 **parsimonious leg** (use the spectral structure to trade fewer names → less spread paid — the RMT
@@ -771,6 +771,7 @@ In VS Code, just open a notebook — `.venv` + `.env` are picked up automaticall
 ## 11. Project structure
 
 ```
+main.py        end-to-end pipeline: WRDS → base parquets → signals/ML → backtests
 src/dispersion/
   data/        WRDS access (wrds_client), universe, iv, returns
   signal/      implied correlation, premium & signal (implied_corr)  (Week 2 ✓)
@@ -858,7 +859,8 @@ does not improve v1_rmt — while the unsupervised regime detector still lights 
 (*detecting stress ≠ predicting the loss*). Full results, figures and the thesis-writing guide in
 **§14**; nine figures + five tables in `results/`. Test suite 37/37.
 
-**Next — Week 5:** robustness (subperiods, cost sensitivity, Deflated Sharpe) + the 3,000-word paper.
+**Next — Week 5:** robustness (subperiods with Newey–West, cost ±50%, threshold sensitivity) + the
+3,000-word paper.
 See §14.4 and `plan.md`.
 
 ---
@@ -921,7 +923,15 @@ grid unless stated; the full table is `results/tables/table_ml_metrics.csv`.
    all three crashes including Volmageddon. **An ablation is decisive and honest: the raw (un-clipped)
    252-day window does the same (Sharpe 0.78 gross, 2/115 gate disagreements)** — the value is the slow
    estimation window, the Laloux clipping adds ~+0.02. The MP spectrum with the Laloux-corrected edge
-   (K = 7 sector+market factors vs 4 naïvely) is `fig_mp_spectrum.png`.
+   (K = 7 sector+market factors vs 4 naïvely) is `fig_mp_spectrum.png`. **Parsimonious leg — RMT's
+   frictions answer (Week 5, `fig_parsimonious.png`):** trading only the **top-20** constituent names
+   (by cap) instead of all 100 cuts the cost from 3.68% to 3.36% per traded quarter (~9%, the wide
+   small-cap spreads are avoided) and **beats the full basket net of costs** (net Sharpe 0.60 vs 0.57,
+   skew +1.14 vs +1.00) — although *gross* it is slightly worse (0.75 vs 0.78, a small
+   dispersion-replication error), so parsimony pays **net but not gross**, exactly the friction-saving
+   mechanism. Honest caveat: the effect is **non-monotonic** (n=30, 50 fall below the full basket), so
+   the K=20 optimum is partly noise on ~40 traded quarters — the robust claim is “~15–20 names do at
+   least as well as 100, net, at lower cost,” not that 20 is uniquely optimal.
 4. **The ML timing layer does not add value — a clean null** (Week 4). A purged walk-forward
    meta-model (predict the trade's quarterly return, veto the bad tail) has **essentially no predictive
    power** (corr(ŷ, y): VIX +0.02, VIX+spectral −0.14, Full −0.20) and **does not improve** v1_rmt (net
@@ -943,6 +953,24 @@ grid unless stated; the full table is `results/tables/table_ml_metrics.csv`.
    (from −58.5%), same Sharpe; gross skew +1.51, maxDD −44.8%. It is the cleanest overlay (no
    overfitting) and the only ML-adjacent lever that improves the risk profile — a candidate to adopt.
    Outputs `backtest_regonly_*`, `backtest_spike_*`, `ml_levers_summary.json`.
+
+### 14.1bis Recommended final strategy (Week 5, adopted)
+
+**`v1_rmt + regime`** — short a correlation basket only when (i) the RMT-cleaned 252-day signal is
+above its ex-ante median (v1_rmt primary gate) **and** (ii) the unsupervised causal regime detector
+is not in its high (dangerous) tail (ex-ante 67th-percentile veto). This is the cleanest strategy that
+improves the *risk profile* without a supervised, overfitting-prone layer:
+
+| Strategy | Net Sharpe | Net skew | Net maxDD | Gross Sharpe | Gross skew |
+|---|---|---|---|---|---|
+| v0 (unconditional) | 0.42 | −1.33 | −99.0% | 0.77 | −1.29 |
+| v1_rmt | 0.56 | +0.80 | −58.5% | 0.80 | +1.28 |
+| **v1_rmt + regime** | **0.57** | **+1.00** | **−52.4%** | **0.78** | **+1.51** |
+
+Honest caveat: the return improvement is within noise (Sharpe 0.56→0.57); the genuine gain is
+tail-shape (skew, drawdown), which is exactly the stated objective (cut the tails, not the mean). Its
+robustness to the veto-quantile choice is a Week-5 sensitivity (§14.4). The supervised ML timing layer
+is **not** part of the recommended strategy — it added nothing (§14.1 result 4).
 
 ### 14.2 Suggested thesis structure → where each piece lives
 
@@ -969,9 +997,55 @@ grid unless stated; the full table is `results/tables/table_ml_metrics.csv`.
   implementation (not built — Week-5 candidate).
 - **One provider gap** (OptionMetrics Aug-2020, 17 days) accepted, not fabricated (§9bis).
 
-### 14.4 Robustness still open (Week 5)
+### 14.4 Robustness — results (Week 5, notebook 10)
 
-Subperiod stability of every headline stat with Newey–West; cost grid ±50% and a stress-×2 variant;
-v1 threshold and ML veto-quantile sensitivity; per-name delta hedge; MFIV reconstruction on the index
-leg to bound the ATM-proxy bias; the parsimonious RMT leg; Deflated Sharpe / PBO on the strategy
-family. All pre-listed in `plan.md`.
+**Premium by subperiod (Newey–West).** The CRP is strongly significant early and compresses to
+insignificance post-2020 — the limits-to-arbitrage prediction, quantified:
+
+| Period | Mean premium | t-NW(63) | % days > 0 |
+|---|---|---|---|
+| 1996–2003 | 0.085 | 4.87 | 73% |
+| 2004–2007 | 0.078 | 4.06 | 81% |
+| 2008–2012 | 0.135 | 4.25 | 83% |
+| 2013–2019 | 0.069 | 3.29 | 75% |
+| **2020–2024** | **0.028** | **1.19** | 63% |
+
+**Strategy Sharpe by subperiod — the honest nuance (`fig_subperiods.png`).** The RMT gate's Sharpe
+advantage is **regime-dependent, not uniform**: it shines in 2004–2007 (v1_rmt 1.01 vs v0 0.67) but
+**v0 wins in 2008–2012 (0.39 vs 0.03) and 2013–2019 (0.62 vs 0.45)** — in the premium-rich crisis era,
+always-trading did fine on Sharpe and gating merely cut trades. The gate's genuine, robust benefit is
+**tail-shape** (skew, drawdown over the full sample), driven by avoiding specific crashes (2018, 2024),
+**not** a uniform per-era Sharpe lift. State this plainly in the paper.
+
+**Cost and threshold sensitivity of `v1_rmt+regime` (`table_sensitivity.csv`).** Robust, not
+knife-edge: net Sharpe **0.46–0.67** across cost ±50% (still above v0's 0.42 even at ×1.5), **0.57–0.58**
+across the regime veto-quantile (0.50/0.67/0.80 — a tighter veto lifts skew to +1.31), and **0.54–0.56**
+across the v1_rmt gate quantile (0.40/0.60). The tail improvement survives every threshold choice.
+
+**Vanna/Volga — the convexity risk of the frozen book (`fig_vanna_volga.png`).** Closed-form Volga
+($\partial\text{vega}/\partial\sigma$) and Vanna ($\partial\text{vega}/\partial S$) are added to
+`utils.greeks` (bump-tested). The point: at entry an ATM straddle sits near the second-order-neutral
+strike ($d_2=0$), where **both Volga and Vanna vanish** — so the DMV proportional-vega neutrality is
+clean *at inception*. But it is a **first-order** property: as positions are held frozen for the
+quarter and the spot drifts while implied vol moves, the straddles leave that point, Volga and Vanna
+grow (sharpening as they age — the 28-day curve), and the vega-neutrality **erodes**. Empirically the
+v0 book's total vega drifts by **~3,600** over Q1-2018 (Volmageddon) — the frozen neutrality unwinding
+precisely in the correlation spike. This is the accepted convexity risk noted at design time (§7.3);
+the daily delta-hedge removes only the first-order directional risk, not this second-order channel,
+which is part of why crisis quarters bleed (§14.1 result 2).
+
+**MFIV robustness — the ATM proxy is conservative, quantified (`fig_mfiv_bias.png`).** We rebuild the
+**model-free implied variance** on the index leg from the full SPX delta grid (17 call + 17 put
+pillars per date, VIX-style Carr–Madan replication) over the 116 rebalances. The index MFIV exceeds
+ATM by **+1.2 vol points on average** (19.7% vs 18.5% — the steep put skew), on **100% of dates**.
+Propagated through the inversion, substituting MFIV for ATM on the index raises $\rho_{\text{implied}}$
+by **Δρ ≈ +0.066 on average (always positive)**, i.e. from 0.43 to ~0.50. So the ATM-based
+$\rho_{\text{implied}}$ — and hence the headline premium — is a **conservative lower bound**; with MFIV
+the correlation-risk premium would be *larger*, strengthening the thesis. *Honest nuance:* this is the
+**index-leg-only** effect (an upper bound on the true bias) — applying MFIV to the flatter single-name
+smiles too would partially offset it, but the net stays positive because the index skew is much
+steeper than single-name skews (exactly DMV's mechanism). Table `table_mfiv_bias.csv`.
+
+### 14.5 Robustness still open (Week 5 remaining)
+
+Per-name delta hedge (optional). All other pre-listed robustness items are done (§14.4).

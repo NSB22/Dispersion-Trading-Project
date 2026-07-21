@@ -1,14 +1,10 @@
 """
-RMT cleaning of realised correlation matrices (README §8bis; validated in
-exploration_notebooks/07_explore_spectrum.ipynb).
+RMT cleaning of realised correlation matrices: EWMA de-vol, a 252-day
+correlation of the standardised residuals, then Marchenko-Pastur clipping of
+the noise bulk (Laloux edge).
 
-Pipeline (frozen, Week 4): EWMA(λ=0.94) de-volatilisation → 252-day correlation
-of standardised residuals (complete-case) → Marchenko–Pastur with the **Laloux
-effective edge** λ₊ᵉᶠᶠ = (1 − λ₁/N)(1 + √q_mp)² → clip the bulk to its mean
-(trace-preserving) → renormalise (diag = 1, PSD).
-
-Notation: `q_mp` = N/T is the Bouchaud–Potters MP aspect ratio — NOT the
-dividend yield `q` of the pricing modules (utils/greeks, backtest/engine).
+Here `q_mp` = N/T is the MP aspect ratio, not the dividend yield `q` used in
+the pricing modules.
 
 Usage:
     from dispersion.rmt.cleaning import devolatilise, corr_window, laloux_clip
@@ -27,9 +23,9 @@ EWMA_LAMBDA = 0.94
 def devolatilise(returns_wide: pd.DataFrame, lam: float = EWMA_LAMBDA,
                  min_periods: int = 20) -> pd.DataFrame:
     """
-    Standardised residuals z_t = log-return_t / sigma_{t-1}, with sigma from an
-    EWMA (RiskMetrics decay). The one-day shift keeps sigma PREDICTABLE — no
-    look-ahead inside subsequent correlation windows.
+    Standardised residuals z_t = log-return_t / sigma_{t-1}, sigma from an EWMA.
+    The one-day shift keeps sigma predictable so correlation windows don't peek
+    ahead.
     """
     logret = np.log1p(returns_wide.astype("float64"))
     sigma = logret.ewm(alpha=1.0 - lam, min_periods=min_periods).std().shift(1)
@@ -39,13 +35,12 @@ def devolatilise(returns_wide: pd.DataFrame, lam: float = EWMA_LAMBDA,
 def corr_window(z: pd.DataFrame, date, permnos, t_win: int = T_WIN,
                 min_obs: int = MIN_OBS, min_names: int = 60):
     """
-    Complete-case correlation of the last `t_win` rows of z up to `date`, for
-    the given universe. Names with fewer than `min_obs` observations in the
-    window are dropped first (listwise philosophy, §6.3). Returns None if the
-    panel is too thin, else (C, t_eff) where **t_eff is the EFFECTIVE number of
-    complete-case rows** — the MP edge must use q_mp = N/t_eff, not N/t_win
-    (nominal-T under-cleans: iid noise at t_eff=201 passed as 252 shows spurious
-    k_signal — adversarial audit, 17 Jul).
+    Complete-case correlation of the last `t_win` rows of z up to `date` for the
+    given universe. Names with fewer than `min_obs` observations are dropped
+    first. Returns None if the panel is too thin, else (C, t_eff).
+
+    t_eff is the number of complete-case rows actually used; the MP edge needs
+    q_mp = N/t_eff, not N/t_win, or iid noise slips through as signal.
     """
     cols = [p for p in permnos if p in z.columns]
     win = z.loc[:pd.Timestamp(date), cols].tail(t_win)
@@ -57,11 +52,9 @@ def corr_window(z: pd.DataFrame, date, permnos, t_win: int = T_WIN,
 
 def laloux_clip(C: pd.DataFrame, t_win: int = T_WIN):
     """
-    Clip the noise bulk of a correlation matrix below the Laloux effective edge.
-
-    Returns (C_clean, diagnostics) with diagnostics carrying n, t, q_mp,
-    lam1_share, edge_naive, edge_laloux, k_signal and trace_prenorm (the
-    trace-preservation witness before the diagonal renormalisation).
+    Clip eigenvalues below the Laloux edge to the bulk mean, then renormalise.
+    Returns (C_clean, diagnostics); diagnostics holds n, t, q_mp, lam1_share,
+    edge_naive, edge_laloux, k_signal and trace_prenorm.
     """
     is_df = isinstance(C, pd.DataFrame)
     A = C.to_numpy(dtype="float64") if is_df else np.asarray(C, dtype="float64")
@@ -91,13 +84,12 @@ def laloux_clip(C: pd.DataFrame, t_win: int = T_WIN):
 
 def spectral_features(C: pd.DataFrame, t_win: int = T_WIN, top: int = 5):
     """
-    Regime features of a correlation matrix (role B, README §8bis):
-    lam1_share, k_signal (Laloux edge), absorption_top (Kritzman-style top-`top`
-    absorption ratio), lam2_share (sector-block strength), spec_entropy
-    (spectral entropy −Σ p ln p, p = λ/N — risk concentration), pr_v1
-    (participation ratio of the market mode / N — how many names carry it).
-    Returns (features dict, dominant eigenvector as a pd.Series) — the caller
-    computes the day-to-day rotation 1 − |v1_t · v1_{t-1}|.
+    Regime features of a correlation matrix. Returns (features dict, dominant
+    eigenvector); the caller uses v1 for the day-to-day rotation.
+
+    Features: lam1_share (market mode), k_signal (factors above the Laloux
+    edge), absorption_top (top-`top` absorption ratio), lam2_share, spec_entropy
+    (spectral entropy, risk concentration), pr_v1 (how spread the market mode is).
     """
     A = C.to_numpy(dtype="float64")
     n = A.shape[0]

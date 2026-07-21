@@ -1,19 +1,9 @@
 """
-Black–Scholes / Black-76 pricing and greeks, with per-contract <-> relative conversions.
+Black-Scholes / Black-76 prices and greeks, with per-contract <-> relative
+conversions. sigma is annualised IV in decimals, T in years, r and q continuous.
 
-Frozen conventions (README §8bis):
-- sigma = ANNUALISED implied volatility in DECIMAL (0.20 = 20%), as in vsurfd.
-- T in years (ACT/365: days/365); r, q continuously compounded in decimal
-  (zerocd rates come in %, divide by 100).
-- vega = dP/d(sigma) with sigma in decimal (price change for +1.00 of vol, NOT per point).
-- theta = dP/dt (calendar decay as time passes, per year) = -dP/dT. Negative for long options.
-- RELATIVE greeks are per dollar invested: greek / price — the DMV eq. (8)-(11) wealth-weight
-  framework. Mixing per-contract greeks with wealth weights silently yields a wrong hedge.
-
-Two equivalent parameterisations:
-- spot form  : bs_price/bs_greeks(S, K, sigma, T, r, q, cp) with continuous dividend yield q;
-- forward form: black76_price(F, K, sigma, T, r, cp) with F = S*exp((r-q)*T) — preferred, since
-  OptionMetrics forwards (fwdprd) or put-call-parity forwards embed dividends model-free.
+Relative greeks are per dollar invested (greek / price) — that's the ratio the
+vega hedge uses; mixing per-contract greeks with wealth weights gives a wrong hedge.
 
 Usage:
     from dispersion.utils.greeks import bs_greeks, relative_greeks, implied_forward
@@ -22,7 +12,7 @@ import numpy as np
 from scipy.optimize import brentq
 from scipy.stats import norm
 
-GREEK_KEYS = ("price", "delta", "gamma", "vega", "theta")
+GREEK_KEYS = ("price", "delta", "gamma", "vega", "theta", "volga", "vanna")
 
 
 # ----------------------------------------------------------------------------- #
@@ -46,7 +36,7 @@ def bs_price(S, K, sigma, T, r, q, cp: str) -> float:
 
 def black76_price(F, K, sigma, T, r, cp: str) -> float:
     """European option price, forward form (Black-76): discounts the forward payoff."""
-    # equivalent to the spot form with S = F*exp(-(r-q)*T); set q such that S*e^{(r-q)T}=F
+    # same as the spot form with S = F*exp(-(r-q)*T)
     st = sigma * np.sqrt(T)
     d1 = (np.log(F / K) + 0.5 * sigma**2 * T) / st
     d2 = d1 - st
@@ -63,9 +53,13 @@ def black76_price(F, K, sigma, T, r, cp: str) -> float:
 # ----------------------------------------------------------------------------- #
 def bs_greeks(S, K, sigma, T, r, q, cp: str) -> dict:
     """
-    Price + first-order greeks per contract, spot form.
+    Price plus first- and second-order greeks per contract, spot form.
+    Returns dict(price, delta, gamma, vega, theta, volga, vanna).
 
-    Returns dict(price, delta, gamma, vega, theta) — conventions in the module docstring.
+    volga and vanna carry the book's convexity risk:
+      volga = d(vega)/d(sigma) = vega * d1 * d2 / sigma
+      vanna = d(vega)/d(S)     = d(delta)/d(sigma)
+    Both vanish at the ATM-forward and grow as a straddle drifts off ATM.
     """
     d1, d2 = _d1_d2(S, K, sigma, T, r, q)
     eq, er = np.exp(-q * T), np.exp(-r * T)
@@ -73,6 +67,8 @@ def bs_greeks(S, K, sigma, T, r, q, cp: str) -> dict:
 
     gamma = eq * pdf1 / (S * sigma * np.sqrt(T))
     vega = S * eq * pdf1 * np.sqrt(T)
+    volga = vega * d1 * d2 / sigma
+    vanna = -eq * pdf1 * d2 / sigma
     common_theta = -S * eq * pdf1 * sigma / (2.0 * np.sqrt(T))
 
     if cp == "C":
@@ -87,7 +83,8 @@ def bs_greeks(S, K, sigma, T, r, q, cp: str) -> dict:
         raise ValueError(f"cp must be 'C' or 'P', got {cp!r}")
 
     return {"price": float(price), "delta": float(delta), "gamma": float(gamma),
-            "vega": float(vega), "theta": float(theta)}
+            "vega": float(vega), "theta": float(theta),
+            "volga": float(volga), "vanna": float(vanna)}
 
 
 def straddle_greeks(S, K_call, K_put, sigma_call, sigma_put, T, r, q) -> dict:
@@ -98,15 +95,15 @@ def straddle_greeks(S, K_call, K_put, sigma_call, sigma_put, T, r, q) -> dict:
 
 
 # ----------------------------------------------------------------------------- #
-# Per-contract <-> relative (per dollar invested) — the DMV convention
+# Per-contract <-> relative (per dollar invested)
 # ----------------------------------------------------------------------------- #
 def relative_greeks(greeks: dict) -> dict:
     """
-    Convert per-contract greeks to PER-DOLLAR-INVESTED greeks: greek / price.
+    Per-contract greeks -> per-dollar-invested greeks (greek / price).
 
-    This is the object entering wealth-weighted hedge ratios (DMV eq. 10-11):
-        y_i = vega_rel_index / vega_rel_component
-    Using per-contract vegas with wealth weights is silently wrong (unit test covers it).
+    These are what go into the wealth-weighted hedge ratio
+    y_i = vega_rel_index / vega_rel_component; per-contract vegas with wealth
+    weights give the wrong hedge.
     """
     price = greeks["price"]
     if price <= 0:

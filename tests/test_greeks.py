@@ -1,11 +1,7 @@
 """
-Unit tests for dispersion.utils.greeks.
-
-Four families (plan S3, README §8bis):
-1. closed-form values & identities (ATM-forward, put-call parity, greek symmetries);
-2. every greek vs bump-and-reprice finite differences;
-3. the DMV anti-trap: relative vs per-contract vega hedge ratios;
-4. real-data reproduction: SPX standardised premiums of 2024-06-28 (notebook 04).
+Tests for dispersion.utils.greeks: closed-form values and identities, greeks vs
+finite differences, the relative-vs-per-contract vega hedge, and reproducing real
+SPX premiums.
 """
 import numpy as np
 import pytest
@@ -21,7 +17,7 @@ from dispersion.utils.greeks import (
     straddle_greeks,
 )
 
-# a deliberately non-trivial base case: ITM-ish call, dividends, rates
+# non-trivial base case: ITM-ish call, with dividends and rates
 BASE = dict(S=100.0, K=95.0, sigma=0.25, T=0.25, r=0.04, q=0.015)
 
 
@@ -29,13 +25,13 @@ BASE = dict(S=100.0, K=95.0, sigma=0.25, T=0.25, r=0.04, q=0.015)
 # 1. Closed form & identities
 # --------------------------------------------------------------------------- #
 def test_atm_forward_closed_form():
-    # r = q = 0 and K = S  =>  F = K: d1 = sigma*sqrt(T)/2, exact closed form
+    # BS price against its exact closed form when r = q = 0 and K = S
     S = K = 100.0
     sigma, T = 0.20, 91 / 365
     d = 0.5 * sigma * np.sqrt(T)
     expected_call = S * (norm.cdf(d) - norm.cdf(-d))
     assert bs_price(S, K, sigma, T, 0.0, 0.0, "C") == pytest.approx(expected_call, rel=1e-12)
-    # ATM-forward call and put have the same price
+    # ATM-forward, so call and put match
     assert bs_price(S, K, sigma, T, 0.0, 0.0, "P") == pytest.approx(expected_call, rel=1e-12)
 
 
@@ -50,11 +46,11 @@ def test_put_call_parity_and_symmetries():
         q = rng.uniform(0.0, 0.05)
         c = bs_greeks(S, K, sigma, T, r, q, "C")
         p = bs_greeks(S, K, sigma, T, r, q, "P")
-        # parity: C - P = S e^{-qT} - K e^{-rT}
+        # put-call parity: C - P = S e^{-qT} - K e^{-rT}
         assert c["price"] - p["price"] == pytest.approx(
             S * np.exp(-q * T) - K * np.exp(-r * T), abs=1e-9
         )
-        # delta_C - delta_P = e^{-qT}; gamma and vega identical across legs
+        # delta_C - delta_P = e^{-qT}; gamma and vega equal across the two legs
         assert c["delta"] - p["delta"] == pytest.approx(np.exp(-q * T), abs=1e-12)
         assert c["gamma"] == pytest.approx(p["gamma"], rel=1e-12)
         assert c["vega"] == pytest.approx(p["vega"], rel=1e-12)
@@ -100,13 +96,13 @@ def test_straddle_is_sum_of_legs():
 def test_greeks_match_finite_differences(cp):
     S, K, sigma, T, r, q = BASE.values()
     g = bs_greeks(S, K, sigma, T, r, q, cp)
-    hs, h = 1e-3, 1e-5  # larger bump for the 2nd derivative (cancellation noise ~1/h^2)
+    hs, h = 1e-3, 1e-5  # bigger S bump for the second derivative (cancellation noise ~1/h^2)
 
     delta_fd = (bs_price(S + hs, K, sigma, T, r, q, cp) - bs_price(S - hs, K, sigma, T, r, q, cp)) / (2 * hs)
     gamma_fd = (bs_price(S + hs, K, sigma, T, r, q, cp) - 2 * bs_price(S, K, sigma, T, r, q, cp)
                 + bs_price(S - hs, K, sigma, T, r, q, cp)) / hs**2
     vega_fd = (bs_price(S, K, sigma + h, T, r, q, cp) - bs_price(S, K, sigma - h, T, r, q, cp)) / (2 * h)
-    # theta = dP/dt (time passing) = -dP/dT
+    # theta is the derivative w.r.t. time passing, i.e. -dP/dT
     theta_fd = -(bs_price(S, K, sigma, T + h, r, q, cp) - bs_price(S, K, sigma, T - h, r, q, cp)) / (2 * h)
 
     assert g["delta"] == pytest.approx(delta_fd, rel=1e-7)
@@ -114,9 +110,29 @@ def test_greeks_match_finite_differences(cp):
     assert g["vega"] == pytest.approx(vega_fd, rel=1e-7)
     assert g["theta"] == pytest.approx(theta_fd, rel=1e-6)
 
+    # second order: volga = d(vega)/d(sigma), vanna = d(vega)/d(S)
+    volga_fd = (bs_greeks(S, K, sigma + h, T, r, q, cp)["vega"]
+                - bs_greeks(S, K, sigma - h, T, r, q, cp)["vega"]) / (2 * h)
+    vanna_fd = (bs_greeks(S + hs, K, sigma, T, r, q, cp)["vega"]
+                - bs_greeks(S - hs, K, sigma, T, r, q, cp)["vega"]) / (2 * hs)
+    assert g["volga"] == pytest.approx(volga_fd, rel=1e-5)
+    assert g["vanna"] == pytest.approx(vanna_fd, rel=1e-5)
+
+
+def test_second_order_greeks_vanish_at_d2_zero_strike():
+    # volga (∝ d1·d2) and vanna (∝ d2) are both zero at the strike where d2 = 0,
+    # and grow as a straddle ages away from it -- that drift is the convexity risk.
+    S, sigma, T, r, q = 100.0, 0.25, 0.5, 0.03, 0.01
+    K0 = S * np.exp((r - q - 0.5 * sigma**2) * T)      # d2 = 0
+    g0 = bs_greeks(S, K0, sigma, T, r, q, "C")
+    assert abs(g0["vanna"]) < 1e-9 and abs(g0["volga"]) < 1e-9
+    # spot drifted down 15%: both are clearly non-zero
+    g1 = bs_greeks(S * 0.85, K0, sigma, T, r, q, "C")
+    assert abs(g1["vanna"]) > 1e-3 and abs(g1["volga"]) > 1e-2
+
 
 # --------------------------------------------------------------------------- #
-# 3. The DMV anti-trap: relative vs per-contract hedge ratios
+# 3. Relative vs per-contract hedge ratios
 # --------------------------------------------------------------------------- #
 def test_relative_vega_hedge_is_wealth_neutral_and_per_contract_is_not():
     T, r, q = 0.25, 0.04, 0.0
@@ -127,27 +143,27 @@ def test_relative_vega_hedge_is_wealth_neutral_and_per_contract_is_not():
                            sigma_call=0.30, sigma_put=0.30, T=T, r=r, q=q)
     idx_rel, comp_rel = relative_greeks(idx), relative_greeks(comp)
 
-    # DMV eq. (10): wealth ratio built on RELATIVE vegas
+    # hedge ratio from the relative vegas
     y = idx_rel["vega"] / comp_rel["vega"]
-    # short 1$ of index straddle, long y$ of component straddle -> wealth-vega = 0
+    # short $1 of index, long $y of component -> zero wealth-vega
     wealth_vega = -1.0 * idx_rel["vega"] + y * comp_rel["vega"]
     assert wealth_vega == pytest.approx(0.0, abs=1e-12)
 
-    # the TRAP: per-contract vega ratio used as a wealth ratio leaves a large residual
+    # using the per-contract vega ratio instead leaves a large residual
     y_trap = idx["vega"] / comp["vega"]
     wealth_vega_trap = -1.0 * idx_rel["vega"] + y_trap * comp_rel["vega"]
-    assert abs(wealth_vega_trap) > 0.1 * idx_rel["vega"]  # materially wrong, not a rounding issue
+    assert abs(wealth_vega_trap) > 0.1 * idx_rel["vega"]  # off by a lot, not rounding
 
-    # and the two ratios differ exactly by the price ratio: y_trap/y = P_index/P_component
+    # the two ratios differ by exactly the price ratio
     assert y_trap / y == pytest.approx(idx["price"] / comp["price"], rel=1e-12)
 
 
 # --------------------------------------------------------------------------- #
-# 4. Real data: SPX standardised 91d ±50δ, 2024-06-28 (notebook 04)
+# 4. Real data: SPX standardised 91d ±50δ, 2024-06-28
 # --------------------------------------------------------------------------- #
 def test_reproduces_spx_impl_premium_2024():
     S, T, r = 5460.48, 91 / 365, 0.0550  # secprd close, zerocd 91d
-    q = 0.0104                            # implied dividend yield, identical across legs (nb 04)
+    q = 0.0104                            # implied dividend yield, same for both legs
     call = bs_price(S, 5530.623, 0.121323, T, r, q, "C")
     put = bs_price(S, 5531.409, 0.113183, T, r, q, "P")
     assert call == pytest.approx(127.2951, rel=5e-3)

@@ -17,35 +17,20 @@ def get_iv(
     date_end: str,
     days: int = 91,
 ) -> pd.DataFrame:
-    """
-    Extract ATM (delta +-50) implied vol at a fixed maturity for given securities.
+    """ATM (delta ±50) implied vol at a fixed maturity for the given securities.
 
-    Pure data extraction — no knowledge of rebalancing or point-in-time membership.
-    Works identically for the index (secid 108105) and its constituents.
+    Pure extraction — no rebalancing or membership logic. Works the same for the
+    index (secid 108105) and its constituents.
 
-    Parameters
-    ----------
-    db          : open wrds.Connection
-    secids      : list of OptionMetrics security ids
-    date_start  : 'YYYY-MM-DD' inclusive
-    date_end    : 'YYYY-MM-DD' inclusive
-    days        : maturity in days (default 91, native in vsurfd)
-
-    Returns
-    -------
-    Tidy DataFrame, one row per (secid, date):
-        secid        – OptionMetrics security id
-        date         – trading date
-        iv_call_50   – implied vol at delta +50 (the call leg)
-        iv_put_50    – implied vol at delta -50 (the put leg)
-        iv_atm       – mean of the two legs (NaN if either leg missing — strict ATM)
+    One row per (secid, date): secid, date, iv_call_50 (delta +50), iv_put_50
+    (delta -50), iv_atm (mean of the two legs, NaN if either is missing).
     """
     secid_list = ",".join(str(int(s)) for s in secids)
     y0, y1 = int(date_start[:4]), int(date_end[:4])
 
     frames = []
     for year in range(y0, y1 + 1):
-        # clip the window to this year's table
+        # clip the window to this year's slice of vsurfd
         lo = max(date_start, f"{year}-01-01")
         hi = min(date_end, f"{year}-12-31")
         q = f"""
@@ -71,13 +56,13 @@ def get_iv(
         .reset_index()
     )
     wide.columns.name = None
-    # ensure both leg columns exist even if one delta never appeared
-    # (np.nan, NOT pd.NA: an object column would make mean(skipna=False) raise — audit §9bis)
+    # make sure both leg columns exist even if a delta never showed up.
+    # use np.nan, not pd.NA — an object column makes mean(skipna=False) raise
     for col in ("iv_call_50", "iv_put_50"):
         if col not in wide.columns:
             wide[col] = np.nan
 
-    # strict ATM: mean only when BOTH legs present
+    # need both legs or it's NaN
     wide["iv_atm"] = wide[["iv_call_50", "iv_put_50"]].mean(axis=1, skipna=False)
 
     return wide[["secid", "date", "iv_call_50", "iv_put_50", "iv_atm"]].sort_values(
@@ -92,18 +77,13 @@ def get_surface(
     date_end: str,
     days: tuple[int, ...] = (10, 30, 60, 91),
 ) -> pd.DataFrame:
-    """
-    Extract the standardised surface (both ±50Δ legs) at several maturity pillars.
+    """Standardised surface (both ±50Δ legs) at several maturity pillars.
 
-    Marking-grade data for the backtest (README §8bis: daily mark-to-surface):
-    residual maturity of a 91d position lives in (0, 91], hence the sub-91 pillars.
-    RAW vendor values — no cleaning here; the signal-grade 91d series keeps its own
-    cleaning policy in assemble.py.
+    Marking-grade data: a 91d position ages into shorter residual maturities, so
+    we pull the sub-91 pillars too. Raw vendor values, no cleaning here.
 
-    Returns
-    -------
-    Long DataFrame, one row per (secid, date, days, cp_flag):
-        secid, date, days, cp_flag ('C'/'P'), iv, premium, strike
+    One row per (secid, date, days, cp_flag): secid, date, days, cp_flag
+    ('C'/'P'), iv, premium, strike.
     """
     secid_list = ",".join(str(int(s)) for s in secids)
     days_list = ",".join(str(int(d)) for d in days)

@@ -1,20 +1,7 @@
 """
-Daily mark-to-surface utilities for aged option positions (README §7.3).
+Mark aged option positions day by day: interpolate ATM sigma across pillars,
+look up rates, and rebase strikes for splits.
 
-Frozen rules:
-- ATM pillar IVs at 30/60/91 days, interpolated LINEARLY IN TOTAL VARIANCE
-  (sigma^2 * tau) between pillars;
-- below 30 days of residual maturity: sigma := that day's sigma(30d), re-read daily
-  (only the short-end slope is ignored, never the level moves);
-- ATM proxy: the interpolated ATM sigma is applied to the position's FIXED entry
-  strike via BS (documented approximation, §7.3) — pricing itself lives in
-  dispersion.utils.greeks;
-- rates: zerocd curve interpolated at tau, with a bounded date-ffill for the few
-  calendar days missing from zerocd (§9bis);
-- splits: strikes and quantities are rebased with secprd's cfadj
-  (K_t = K_entry * cfadj_entry / cfadj_t; quantity scales by the inverse).
-
-Usage:
     from dispersion.backtest.marking import interp_sigma, RateCurve, adjust_strike
 """
 import numpy as np
@@ -25,16 +12,9 @@ PILLARS = (30, 60, 91)
 
 def interp_sigma(sig30, sig60, sig91, tau_days):
     """
-    ATM sigma at residual maturity `tau_days`, linear in total variance.
-
-    Piecewise rule on w(tau) = sigma^2 * tau (tau in days — the 1/365 scaling
-    cancels in the interpolation):
-        tau <= 30           : sigma(30)                (frozen short end, §7.3)
-        30 < tau <= 60      : w linear between pillars 30 and 60
-        60 < tau <= 91      : w linear between pillars 60 and 91
-        tau > 91            : sigma(91)                (never needed: tau <= 91)
-
-    Inputs may be scalars or aligned numpy/pandas arrays; NaN pillars propagate.
+    ATM sigma at residual maturity `tau_days`, interpolated linearly in total
+    variance w = sigma^2 * tau. Below 30 days we hold sigma(30) (short-end slope
+    dropped, level still tracked). Scalars or aligned arrays; NaN pillars propagate.
     """
     sig30 = np.asarray(sig30, dtype=float)
     sig60 = np.asarray(sig60, dtype=float)
@@ -43,9 +23,8 @@ def interp_sigma(sig30, sig60, sig91, tau_days):
 
     w30, w60, w91 = sig30**2 * 30.0, sig60**2 * 60.0, sig91**2 * 91.0
 
-    # linear total variance on each segment
-    w_lo = w30 + (w60 - w30) * (tau - 30.0) / 30.0        # segment [30, 60]
-    w_hi = w60 + (w91 - w60) * (tau - 60.0) / 31.0        # segment [60, 91]
+    w_lo = w30 + (w60 - w30) * (tau - 30.0) / 30.0        # [30, 60]
+    w_hi = w60 + (w91 - w60) * (tau - 60.0) / 31.0        # [60, 91]
 
     with np.errstate(invalid="ignore", divide="ignore"):
         sig_lo = np.sqrt(w_lo / tau)
@@ -61,12 +40,10 @@ def interp_sigma(sig30, sig60, sig91, tau_days):
 class RateCurve:
     """
     Continuously-compounded zero rate r(date, tau) from the zerocd panel.
-
-    - linear interpolation across the maturity grid (clamped at the ends);
-    - bounded date-ffill: if `date` is absent from zerocd (10 of 7,281 calendar
-      days, §9bis), the most recent curve within `max_stale_days` CALENDAR days is
-      used; beyond that a KeyError is raised (loud failure, no silent staleness).
-    Rates come in percent in the parquet and are returned as decimals.
+    Linear across the maturity grid, clamped at the ends. If `date` is missing
+    from zerocd, fall back to the most recent curve within `max_stale_days`
+    calendar days; beyond that, raise rather than use a stale rate. Parquet is in
+    percent, returned as decimals.
     """
 
     def __init__(self, rates: pd.DataFrame, max_stale_days: int = 7):
@@ -94,9 +71,8 @@ class RateCurve:
 
 def adjust_strike(k_entry: float, cfadj_entry: float, cfadj_now: float) -> float:
     """
-    Strike rebased to today's price scale after splits (secprd cfadj convention):
-        K_t = K_entry * cfadj_entry / cfadj_t.
-    The position quantity scales by the inverse (cfadj_t / cfadj_entry) so the
-    wealth invested is unchanged by the split.
+    Strike rebased to today's price scale after splits: K_t = K_entry *
+    cfadj_entry / cfadj_t. Quantity scales by the inverse, so a split leaves the
+    invested wealth unchanged.
     """
     return float(k_entry) * float(cfadj_entry) / float(cfadj_now)
