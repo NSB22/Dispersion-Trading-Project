@@ -92,22 +92,28 @@ def laloux_clip(C: pd.DataFrame, t_win: int = T_WIN):
 def spectral_features(C: pd.DataFrame, t_win: int = T_WIN, top: int = 5):
     """
     Regime features of a correlation matrix (role B, README §8bis):
-    lam1_share, k_signal (Laloux edge), absorption_top (share of variance in the
-    `top` largest eigenvalues, Kritzman-style absorption ratio). Returns
-    (features dict, dominant eigenvector as a pd.Series) — the caller computes
-    the day-to-day eigenvector rotation 1 − |v1_t · v1_{t-1}|.
+    lam1_share, k_signal (Laloux edge), absorption_top (Kritzman-style top-`top`
+    absorption ratio), lam2_share (sector-block strength), spec_entropy
+    (spectral entropy −Σ p ln p, p = λ/N — risk concentration), pr_v1
+    (participation ratio of the market mode / N — how many names carry it).
+    Returns (features dict, dominant eigenvector as a pd.Series) — the caller
+    computes the day-to-day rotation 1 − |v1_t · v1_{t-1}|.
     """
     A = C.to_numpy(dtype="float64")
     n = A.shape[0]
     ev, V = np.linalg.eigh(A)
     q_mp = n / t_win
     edge = (1.0 - ev[-1] / n) * (1.0 + np.sqrt(q_mp)) ** 2
+    p = np.clip(ev, 1e-12, None) / n
+    v1 = pd.Series(V[:, -1], index=C.index)
+    if v1.sum() < 0:                               # sign convention: market mode positive
+        v1 = -v1
     feats = {
         "lam1_share": float(ev[-1] / n),
         "k_signal": int((ev >= edge).sum()),
         "absorption_top": float(ev[-top:].sum() / n),
+        "lam2_share": float(ev[-2] / n) if n >= 2 else np.nan,
+        "spec_entropy": float(-(p * np.log(p)).sum()),
+        "pr_v1": float(1.0 / (v1.to_numpy() ** 4).sum() / n),
     }
-    v1 = pd.Series(V[:, -1], index=C.index)
-    if v1.sum() < 0:                               # sign convention: market mode positive
-        v1 = -v1
     return feats, v1

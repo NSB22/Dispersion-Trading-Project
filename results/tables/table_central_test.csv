@@ -1,0 +1,4 @@
+,n_pred,corr_yhat_y,dir_acc,n_crisis,recall_crisis,precision_veto,n_veto,sharpe_net,maxDD_net
+A_vix,78.0,0.024,0.603,8.0,0.375,0.136,22.0,0.514,-0.585
+B_spectral,74.0,-0.141,0.595,8.0,0.0,0.0,9.0,0.57,-0.585
+Full,74.0,-0.197,0.635,8.0,0.125,0.083,12.0,0.57,-0.585

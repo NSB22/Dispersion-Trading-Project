@@ -81,7 +81,7 @@ def build_rmt_daily(
         for d in active:
             res = corr_window(z, d, wmap.index.tolist(), t_win=t_win, min_obs=min_obs)
             if res is None:
-                rows.append((d, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, 0))
+                rows.append((d,) + (np.nan,) * 12 + (0,))
                 v1_prev, lam1_prev = None, np.nan
                 continue
             C, t_eff = res                              # effective T -> honest MP edge
@@ -94,15 +94,31 @@ def build_rmt_daily(
             rho_raw = average_correlation(C, w_kept, s_kept, "weighted")
             rho_clean = average_correlation(C_clean, w_kept, s_kept, "weighted")
 
+            # cross-name dispersion of average correlation (structure heterogeneity)
+            A = C.to_numpy(dtype="float64")
+            corr_xdisp = float(np.std(A.mean(axis=1)))
+            # Mahalanobis turbulence on the CLEANED inverse — the operation where
+            # RMT cleaning genuinely matters (inverting a noisy C is unstable)
+            zrow = z.loc[d, kept].to_numpy(dtype="float64")
+            mask = np.isfinite(zrow)
+            if mask.sum() >= 30:
+                Ainv = np.linalg.pinv(C_clean.to_numpy(dtype="float64")[np.ix_(mask, mask)])
+                zc = zrow[mask]
+                turb = float(zc @ Ainv @ zc / mask.sum())
+            else:
+                turb = np.nan
+
             rows.append((d, rho_raw, rho_clean, feats["lam1_share"], feats["k_signal"],
                          feats["absorption_top"],
                          feats["lam1_share"] - lam1_prev if np.isfinite(lam1_prev) else np.nan,
-                         _rotation(v1, v1_prev), len(kept)))
+                         _rotation(v1, v1_prev), feats["lam2_share"], feats["spec_entropy"],
+                         feats["pr_v1"], corr_xdisp, turb, len(kept)))
             v1_prev, lam1_prev = v1, feats["lam1_share"]
 
     out = pd.DataFrame(rows, columns=["date", "rho_rmt_raw", "rho_rmt_clean", "lam1_share",
                                       "k_signal", "absorption_top", "d_lam1", "rotation",
-                                      "n_names_rmt"])
+                                      "lam2_share", "spec_entropy", "pr_v1", "corr_xdisp",
+                                      "turb", "n_names_rmt"])
     if out_file:
         out.to_parquet(os.path.join(processed_dir, out_file), index=False)
     return out

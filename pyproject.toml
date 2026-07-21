@@ -24,6 +24,8 @@ dependencies = [
     "python-dotenv>=1.0",     # pour gérer les credentials WRDS proprement
     "tqdm>=4.66",             # barres de progression
     "six>=1.17.0",
+    "xgboost>=3.3.0",
+    "hmmlearn>=0.3.3",
 ]
 
 # NB : pas de [build-system] volontairement. Le projet vit sous ~/Desktop (TCC macOS),

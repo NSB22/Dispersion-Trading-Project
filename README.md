@@ -614,7 +614,22 @@ identification via **GMM** (soft calm/stress/crisis probabilities on the spectra
 upgrading the initially planned K-Means) and a **Gaussian HMM** (temporal regime persistence +
 transition matrix; strictly ex-ante **filtered** probabilities — forward algorithm only, never
 smoothed, and walk-forward expanding fits to avoid look-ahead), compared against supervised XGBoost
-under purged walk-forward; the trading gate is P(spike regime) > threshold. Also to explore: a
+under purged walk-forward. **Model wiring decided (17 Jul): stacking, not a parallel vote** — the
+unsupervised regime models (GMM soft-cluster, Gaussian HMM with filtered transition dynamics) are fit
+*without the label* on a small feature subset and emit a regime probability; that probability enters
+the XGBoost candidate pool and must earn its place through selection like any other feature (danger
+labelling of clusters/states uses training-window history only, to avoid leakage). Rationale: in a
+~104-quarter / 12-crisis sample this spends no crisis degrees of freedom on regime detection and lets
+one supervised model learn how much to trust the regime signal, instead of an arbitrary equal-weight
+average. The regime probability fitted on spectral inputs counts as a *spectral-derived* feature, so
+the VIX-vs-VIX+spectral central test stays interpretable. **Trade architecture (revisitable):
+meta-labeling veto** — the primary signal (v1_rmt gate) proposes the trade, the ML layer vetoes it
+when the predicted correlation spike is too high; retained enhancements: continuous spike label
+$y(t)=\bar\rho^{63}_{t+63}-\bar\rho^{63}_t$ (training only, purged), cost-aware gate (trade only if
+predicted edge > the era's §8bis cost), GMM/HMM/XGB probability ensembling, isotonic calibration;
+CPCV + Deflated Sharpe deferred to Week 5. The full protocol (features, label, hyperparameter grids,
+purge 63d + embargo 21d, filtered-only HMM probabilities, the net-Sharpe 0.42 bar) is
+**pre-registered in plan.md before any result was computed**. Also to explore: a
 **parsimonious leg** (use the spectral structure to trade fewer names → less spread paid — the RMT
 answer to frictions). The
 **dual-window justification** (63d = window-matching of the priced horizon; 252d = spectral health)
@@ -833,7 +848,130 @@ marginally) and `table_s3_dmv_sanity.csv`; P&L attribution from the daily ledger
 earn on the short index leg (+10.9%) while **crisis quarters lose through the delta-hedge (−23.0%,
 the realised-variance/gamma channel)**. **Week 3 complete** (Jul 8 — 11 days ahead of schedule).
 
-**Next — Week 4 (RMT + optional ML):** 252-day correlation matrices from `returns.parquet`,
-Marchenko–Pastur + Laloux clipping pipeline (§8bis spec), de-noised $\bar\rho$ re-injected into the
-signal and re-backtested vs baseline; ML regime layer with the quantified bar set by v1: beat net
-Sharpe 0.42 by cutting the −40/−90% quarters. See `plan.md`.
+**Week 4 (RMT + ML) — complete (17 Jul).** RMT cleaning pipeline (`rmt/`, MP + Laloux, 252-day
+windows) with an adversarial look-ahead audit and 3 HMM causality tests passed. **v1_rmt** (gate on
+the RMT-cleaned signal) is the week's real result: net Sharpe **0.56**, skew **+0.80**, maxDD
+**−58.5%** (vs v0 −99%), dodging all three crashes — though an ablation attributes it to the 252-day
+window, not the clipping. The **ML layer is a clean null**: a purged walk-forward meta-model has no
+predictive power over the trade's quarterly return, spectral features do not beat VIX, and the veto
+does not improve v1_rmt — while the unsupervised regime detector still lights up in every crisis
+(*detecting stress ≠ predicting the loss*). Full results, figures and the thesis-writing guide in
+**§14**; nine figures + five tables in `results/`. Test suite 37/37.
+
+**Next — Week 5:** robustness (subperiods, cost sensitivity, Deflated Sharpe) + the 3,000-word paper.
+See §14.4 and `plan.md`.
+
+---
+
+## 13. References (thesis reading list)
+
+**Foundational — the economics of the trade.**
+- Driessen, Maenhout & Vilkov (2009), *The Price of Correlation Risk: Evidence from Equity Options*,
+  Journal of Finance 64(3). The founding reference: implied-correlation construction (eq. 2), the
+  index-vs-individual variance-risk-premium identification (eq. 3), MFIV (eq. 4–5, Carr–Madan), the
+  equicorrelation factor structure (eq. 6), the triangular vega→delta hedge (eq. 8–11), and the
+  Table II/V benchmarks we replicate (§8bis).
+- Carr & Madan (1998/2001), model-free implied variance (the MFIV integral, §5).
+- Bakshi & Kapadia (2003); Bakshi, Kapadia & Madan (2003) — variance risk premium background.
+
+**Random Matrix Theory (Week 4).**
+- Bun, Bouchaud & Potters (2017), *Cleaning large correlation matrices: tools from Random Matrix
+  Theory*, Physics Reports (arXiv:1610.08104). The pivot reference for the cleaning pipeline.
+- Laloux, Cizeau, Bouchaud & Potters (1999), *Noise dressing of the financial correlation matrix*,
+  PRL. The effective-edge correction $\lambda_+^{\text{eff}}=(1-\lambda_1/N)(1+\sqrt{q})^2$ (§8bis).
+- Marchenko & Pastur (1967), the eigenvalue-density law.
+- Potters & Bouchaud (2020), *A First Course in Random Matrix Theory* (textbook).
+- Kritzman, Li, Page & Rigobon (2011), *Principal Components as a Measure of Systemic Risk* — the
+  absorption-ratio feature; Kritzman & Li (2010), *Skulls, Financial Turbulence…* — the Mahalanobis
+  turbulence feature.
+
+**Machine learning & backtest hygiene (Week 4).**
+- López de Prado (2018), *Advances in Financial Machine Learning*, ch. 7 (purged K-fold + embargo),
+  ch. 3 (meta-labelling), ch. 8 (feature importance). The validation discipline throughout the ML
+  layer; the meta-labelling veto architecture (§8bis).
+- Rabiner (1989), the HMM tutorial (forward filtering vs smoothing — our causal-filter choice).
+
+**Data.** WRDS: OptionMetrics IvyDB (`vsurfd`, `opprcd`, `zerocd`, `secprd`, `cboe`); CRSP (`dsf`,
+`dsp500list`); the CRSP–OptionMetrics linking table (`opcrsphist`).
+
+---
+
+## 14. Results consolidation & thesis-writing guide
+
+Everything needed to draft the 3,000-word paper, in one place. Numbers are net of the §8bis cost
+grid unless stated; the full table is `results/tables/table_ml_metrics.csv`.
+
+### 14.1 The four headline results (the spine of the paper)
+
+1. **The correlation risk premium exists** (Week 2). Implied correlation exceeds subsequently-realised
+   correlation by **+0.079 on average** (window-matched, t-NW(63) = 7.4, positive on 75% of the 7,221
+   days), 1996–2024. Chart `fig_crp_validation.png`. Subperiod: strong 1996–2012, **compressed to
+   +0.028 (t = 1.2, insignificant) in 2020–2024** — a falsifiable limits-to-arbitrage prediction
+   confirmed.
+2. **The premium is real but frictions nearly kill it** (Week 3). The unconditional dispersion trade
+   (v0) reproduces DMV Table II out-of-the-box: gross Sharpe **0.77** (theirs 0.73), component weights
+   Σy = **+99.5%** (theirs +101.12%), skew −1.29. Net of costs, DMV Table V replicates on our 29
+   years: Sharpe **0.42** (theirs 0.41), ~3%/yr, cumulative ×2.5. **But gross maxDD −95.8%** — one
+   quarter (Q1-2018 Volmageddon) loses 91%, the delta-hedge bleeding −154% of wealth through the
+   realised-variance/gamma channel (P&L attribution, `table_s3_metrics.csv`). Chart
+   `fig_backtest_s3.png`.
+3. **RMT's value is the 252-day estimator, not the clipping** (Week 4). Gating the trade on the signal
+   built from the RMT-cleaned 252-day correlation (v1_rmt) transforms the risk profile: net Sharpe
+   **0.56**, **skew +0.80** (from negative), **maxDD −58.5%** (from −99%), cumulative ×12.4 — it dodges
+   all three crashes including Volmageddon. **An ablation is decisive and honest: the raw (un-clipped)
+   252-day window does the same (Sharpe 0.78 gross, 2/115 gate disagreements)** — the value is the slow
+   estimation window, the Laloux clipping adds ~+0.02. The MP spectrum with the Laloux-corrected edge
+   (K = 7 sector+market factors vs 4 naïvely) is `fig_mp_spectrum.png`.
+4. **The ML timing layer does not add value — a clean null** (Week 4). A purged walk-forward
+   meta-model (predict the trade's quarterly return, veto the bad tail) has **essentially no predictive
+   power** (corr(ŷ, y): VIX +0.02, VIX+spectral −0.14, Full −0.20) and **does not improve** v1_rmt (net
+   0.56 → 0.57, noise; a VIX-only veto slightly hurts, 0.51). **The central test answer: spectral
+   features do NOT beat VIX** for predicting trade outcomes — because neither predicts. Yet the
+   unsupervised regime detector (`fig_regime_timeline.png`) lights up cleanly in every crisis: the deep
+   finding is **detecting a stress regime ≠ predicting the trade will lose** (stress is often exactly
+   when the premium is richest). Charts `fig_ml_nav.png`, `fig_central_test.png`,
+   `fig_feature_importance.png`, `fig_pred_scatter.png`, `fig_return_dist.png`.
+5. **Two improvement levers (`ml/experiments.py`) — one sharp scientific finding, one modest gain.**
+   *(a) The target was the problem, not the features.* Predicting the DAILY forward correlation
+   **spike** ($\bar\rho_{t+63}-\bar\rho_t$, ~7,000 obs) instead of the quarterly trade return lifts
+   out-of-sample predictability from ≈0 to **corr(ŝ, realised spike) = +0.40** — the spike *is*
+   predictable (correlation is persistent). **Yet vetoing on it does not improve the strategy**
+   (spike-gate net Sharpe 0.53 < 0.56): even a predictable danger signal doesn't help, because the
+   danger is *priced* — a deep confirmation that correlation risk is efficiently compensated
+   (stress≠loss, now quantified). *(b) The unsupervised regime detector used directly as the gate*
+   (no supervised layer) *modestly trims the tail*: net skew **+1.00** (from +0.80), maxDD **−52.4%**
+   (from −58.5%), same Sharpe; gross skew +1.51, maxDD −44.8%. It is the cleanest overlay (no
+   overfitting) and the only ML-adjacent lever that improves the risk profile — a candidate to adopt.
+   Outputs `backtest_regonly_*`, `backtest_spike_*`, `ml_levers_summary.json`.
+
+### 14.2 Suggested thesis structure → where each piece lives
+
+| Thesis section | Source material |
+|---|---|
+| Intro / client spec | §1 economic rationale; result 1 |
+| Theory | §5 (implied corr), §8bis (DMV eq. 2–11 derivations), §8 (premium/signal); references §13 |
+| Data & methodology | §2–§4 (WRDS, universe, IV), §6 (realised side), §6.4/§7.3 (cleaning, engine design), §8bis (RMT pipeline, cost calibration), ML protocol in `plan.md` |
+| Results | §14.1; all figures/tables in `results/` |
+| Limitations | §9, §9bis, §14.3 |
+| Conclusion | result 3+4: RMT estimation helps, supervised timing doesn't — limits-to-arbitrage + hard-timing |
+
+### 14.3 Honest limitations (state them explicitly in the paper)
+
+- **Full-cap weights** (not float-adjusted; IWF access denied), top-100 renormalisation, **ATM proxy**
+  for implied vol (not MFIV) — all documented biases, mostly conservative (§3.4, §5, §7.3).
+- **Costs are a calibrated parametric grid** on quoted (not effective) spreads — conservative, but a
+  model, not per-trade quotes (§8bis).
+- **ML on a tiny sample** (~90 quarterly predictions, ~12 crises): the null result is honest but
+  low-powered; a larger cross-section or a different (daily) label could revisit it — a Week-5 note,
+  not a Week-4 failure.
+- **RMT scalar effect is small** by construction (clipping preserves the market mode that dominates
+  ρ̄); the value shown is via the estimation window and would grow with a parsimonious-leg
+  implementation (not built — Week-5 candidate).
+- **One provider gap** (OptionMetrics Aug-2020, 17 days) accepted, not fabricated (§9bis).
+
+### 14.4 Robustness still open (Week 5)
+
+Subperiod stability of every headline stat with Newey–West; cost grid ±50% and a stress-×2 variant;
+v1 threshold and ML veto-quantile sensitivity; per-name delta hedge; MFIV reconstruction on the index
+leg to bound the ATM-proxy bias; the parsimonious RMT leg; Deflated Sharpe / PBO on the strategy
+family. All pre-listed in `plan.md`.
