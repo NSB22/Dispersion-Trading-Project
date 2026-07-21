@@ -3,11 +3,21 @@
 __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
+.pytest_cache/
 
 # Secrets & credentials WRDS
 .env
 .pgpass
 *.pgpass
+
+# Internal working docs (Claude Code agent instructions & task plan) —
+# not part of the deliverable, kept locally only
+CLAUDE.md
+plan.md
+
+# LaTeX appendix glue for the Overleaf write-up — lives with the thesis,
+# not with the codebase
+appendix.tex
 
 # Données (sous licence WRDS — JAMAIS sur git)
 data/raw/*

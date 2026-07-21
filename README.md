@@ -5,6 +5,43 @@
 This document is both the technical README and the **methodological reference** for the thesis:
 every design choice is justified, with the underlying mathematics, in the sections below.
 
+**Quick links:** [Results](#141-the-four-headline-results-the-spine-of-the-paper) ·
+[Setup](#10-setup) · [Project structure](#11-project-structure) ·
+[Thesis-writing guide](#14-results-consolidation--thesis-writing-guide)
+
+### Results at a glance
+
+| Strategy | Net Sharpe | Net skew | Net max drawdown | Gross Sharpe |
+|---|---|---|---|---|
+| v0 — unconditional dispersion trade | 0.42 | −1.33 | −99.0% | 0.77 |
+| v1_rmt — gated on the RMT-cleaned signal | 0.56 | +0.80 | −58.5% | 0.80 |
+| **v1_rmt + regime — recommended** | **0.57** | **+1.00** | **−52.4%** | **0.78** |
+
+The correlation risk premium is real (+0.079 average, t‑NW(63) = 7.4, 1996–2024) but compresses to
+statistical insignificance after 2020. RMT filtering and an unsupervised regime overlay cut the
+tail risk of the raw trade without adding a supervised ML layer, which turns out to be a clean null
+(spectral features do not beat VIX at predicting the trade's return). Full discussion in
+[§14](#14-results-consolidation--thesis-writing-guide).
+
+<details>
+<summary><b>Table of contents</b></summary>
+
+1. [Economic rationale](#1-economic-rationale)
+2. [Data](#2-data)
+3. [Universe construction](#3-universe-construction)
+4. [Implied volatility](#4-implied-volatility)
+5. [Implied correlation](#5-implied-correlation)
+6. [Realised side (returns, volatility, correlation)](#6-realised-side-returns-volatility-correlation)
+7. [Trade mechanics](#7-trade-mechanics)
+8. [The dispersion signal](#8-the-dispersion-signal--two-window-matched-objects)
+9. [Methodological pitfalls](#9-methodological-pitfalls-enforced)
+10. [Setup](#10-setup)
+11. [Project structure](#11-project-structure)
+12. [Status](#12-status)
+13. [References](#13-references-thesis-reading-list)
+14. [Results consolidation & thesis-writing guide](#14-results-consolidation--thesis-writing-guide)
+</details>
+
 ---
 
 ## 1. Economic rationale
@@ -771,20 +808,28 @@ In VS Code, just open a notebook — `.venv` + `.env` are picked up automaticall
 ## 11. Project structure
 
 ```
-main.py        end-to-end pipeline: WRDS → base parquets → signals/ML → backtests
+main.py                     end-to-end pipeline: WRDS → base parquets → signals/RMT/ML → backtests
+
 src/dispersion/
-  data/        WRDS access (wrds_client), universe, iv, returns
-  signal/      implied correlation, premium & signal (implied_corr)  (Week 2 ✓)
-  backtest/    strategy simulation engine                    (Week 3)
-  rmt/         Random Matrix Theory filtering                (Week 4)
-  ml/          predictive models                             (Week 4, bonus)
-  utils/       greeks.py — BS/Black-76 + relative conversions (Week 3 ✓)
-tests/         pytest suite (test_greeks.py)
-exploration_notebooks/   01_explore_vsurfd, 02_explore_crsp, 03_implied_correlation,
-                         04_explore_premiums, 05_explore_costs, 06_backtest_results
-config/        reserved (parameters currently live as module function defaults)
-data/          raw + processed (git-ignored)
-results/       figures/ + tables/ (generated; figures/fig_crp_validation.png)
+  data/                     WRDS access: wrds_client, universe, iv, returns, spots, assemble
+  signal/                   implied correlation, premium & tradeable signal (implied_corr.py)
+  backtest/                 marking.py (surface interpolation) + engine.py (DispersionEngine)
+  rmt/                      Marchenko-Pastur + Laloux cleaning (cleaning.py), daily pipeline (daily.py)
+  ml/                       features.py, regime.py (GMM/HMM), metamodel.py, experiments.py
+  utils/                    greeks.py — BS / Black-76 + relative-greek conversions
+
+tests/                      pytest suite: greeks, marking, engine, RMT, regime causality (39 tests)
+
+exploration_notebooks/      01-11, numbered in pipeline order: WRDS exploration → implied
+                            correlation → premiums/costs → backtest → RMT spectrum → ML
+                            feature selection/results → robustness/MFIV
+
+results/
+  figures/                  13 PNGs referenced throughout this README
+  tables/                   10 CSVs backing the headline numbers in §14
+
+data/                       raw + processed (git-ignored — WRDS-licensed data)
+config/                     reserved (parameters currently live as module function defaults)
 ```
 
 **Workflow:** explore in `exploration_notebooks/`, promote validated logic into `src/`. The final
@@ -859,9 +904,10 @@ does not improve v1_rmt — while the unsupervised regime detector still lights 
 (*detecting stress ≠ predicting the loss*). Full results, figures and the thesis-writing guide in
 **§14**; nine figures + five tables in `results/`. Test suite 37/37.
 
-**Next — Week 5:** robustness (subperiods with Newey–West, cost ±50%, threshold sensitivity) + the
-3,000-word paper.
-See §14.4 and `plan.md`.
+**Week 5 (robustness + write-up) — complete.** Subperiod analysis (Newey–West), cost/threshold
+sensitivity, the parsimonious leg and the MFIV bias check all done — see §14.4. All source and
+notebooks were then translated to English, given a full end-to-end reproducibility pass
+(`main.py`, 39/39 tests), and the codebase comments were rewritten in a plain, human tone.
 
 ---
 
