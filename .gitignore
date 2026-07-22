@@ -10,8 +10,6 @@ __pycache__/
 .pgpass
 *.pgpass
 
-# Internal working docs (Claude Code agent instructions) — kept locally only
-CLAUDE.md
 
 # LaTeX appendix glue for the Overleaf write-up — lives with the thesis,
 # not with the codebase
