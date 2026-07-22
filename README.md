@@ -11,10 +11,13 @@ modern layers on top — **Random Matrix Theory** cleaning of the correlation ma
 
 The results are reported honestly, nulls included. That is the point of the project.
 
+### 📄 [Read the full report (PDF)](docs/Dispersion_Trading_Report.pdf)
+
 > **Going deeper:** every design decision, with the underlying mathematics, the data-QA
 > log and the week-by-week research log, lives in [METHODOLOGY.md](METHODOLOGY.md).
 > The pre-registered ML protocol (fixed before any result was computed) is in
-> [PLAN.md](PLAN.md).
+> [plan.md](plan.md). <sub>The original project-proposal deck is in
+> [docs/2026_Project_Pitch.pdf](docs/2026_Project_Pitch.pdf).</sub>
 
 ## Results
 
