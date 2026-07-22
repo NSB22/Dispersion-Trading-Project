@@ -183,6 +183,11 @@ accepted as missing rather than repaired.
 - Rabiner, L. R. (1989) A tutorial on hidden Markov models and selected applications in
   speech recognition. *Proceedings of the IEEE*. 77 (2), 257–286.
 
+## License
+
+Code released under the [MIT License](LICENSE). The WRDS data (OptionMetrics, CRSP) is
+not included and remains subject to its own licence.
+
 ---
 
 *Nathan Sebbag — MSc Risk Management & Financial Engineering, Imperial College London.*
