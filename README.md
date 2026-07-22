@@ -16,8 +16,8 @@ The results are reported honestly, nulls included. That is the point of the proj
 > **Going deeper:** every design decision, with the underlying mathematics, the data-QA
 > log and the week-by-week research log, lives in [METHODOLOGY.md](METHODOLOGY.md).
 > The pre-registered ML protocol (fixed before any result was computed) is in
-> [plan.md](plan.md). <sub>The original project-proposal deck is in
-> [docs/2026_Project_Pitch.pdf](docs/2026_Project_Pitch.pdf).</sub>
+> [plan.md](plan.md). The original project-proposal deck is in
+> [docs/2026_Project_Pitch.pdf](docs/2026_Project_Pitch.pdf).
 
 ## Results
 
