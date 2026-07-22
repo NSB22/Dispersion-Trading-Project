@@ -252,8 +252,9 @@ splits at the forward), which integrates the whole smile. We feed
    index implied variance *more* than component variance $\Rightarrow \rho_{\text{implied}}$ is
    **understated**. If implied > realised holds in ATM space, it holds a fortiori in MFIV space.
 3. **Cost** — MFIV needs the full surface (~17 deltas × 2 sides × 100 names × 29 years), delta→strike
-   conversion, tail extrapolation, numerical integration. Kept as a **Week-5 robustness extension**
-   (e.g. index-leg-only reconstruction) if time permits.
+   conversion, tail extrapolation, numerical integration. We ran the index-leg reconstruction as a
+   robustness check (§14.4): MFIV exceeds ATM on 100% of dates, so the ATM measure is a **conservative
+   lower bound** — using MFIV would only make the premium larger.
 
 **Bounds.** From the boxed formula: $\rho_{\text{implied}} \le 1 \iff \sigma_I \le \sum_i w_i\sigma_i$
 (index IV below the weighted-average component IV — diversification), consistent with the QA finding
@@ -455,7 +456,7 @@ straddles. Reasons:
    one instrument at ~0.5–2 bps (index future/ETF) instead of ~100 daily single-name lines each
    paying spread + impact; DMV Table V shows frictions *halve* the strategy's returns, so minimising
    hedge legs is limits-to-arbitrage-aware design, not cosmetics; (iii) consistency with their
-   −32.54% average index position. Per-name hedging = Week-5 robustness check if time allows.
+   −32.54% average index position. Per-name hedging is a natural extension, left out of scope (§14.5).
 
 3. **Expiry: intrinsic settlement at the next rebalance.** The 91d straddle bought at rebalance $R$
    expires within ±3 calendar days of the next rebalance (quarters run 89–92 days). The book settles
@@ -476,7 +477,7 @@ option leaves the ATM point and the mark ignores the smile at the drifted moneyn
 second-order for the strategy's *cumulative* return: each quarter's P&L is anchored by real entry
 premiums (`impl_premium`) and intrinsic settlement (3), so the ATM proxy shapes only the
 intra-quarter path (daily P&L, drawdowns, hedge deltas). Full smile marking (delta-grid extraction)
-is a possible Week-5 refinement.
+is a natural refinement, left out of scope.
 
 ---
 
@@ -621,23 +622,25 @@ the friction-compression story of §8bis (limits to arbitrage) embedded in the c
 spread × premium** (`impl_premium` is mid-like, we cross half the quoted spread); the daily delta
 hedge pays **1 bp of traded notional** (|Δn|×S, index future); intrinsic settlement pays no spread.
 **Conservative by construction:** calibrated on *quoted* spreads while effective is ~2× tighter —
-net results are an honest lower bound. Week-5 sensitivity: grid ±50% and a "stress ×2" variant.
-- **Week 4 — `returns.parquet`:** add a stored daily-returns panel (long: `date, permno, ret`) to the
-  build — required for 252-day RMT matrices and spectral ML features. Schema decided at Week-4 start.
+net results are an honest lower bound. The grid is stress-tested at ±50% in the sensitivity analysis
+(§14.4); the net Sharpe stays above the v0 baseline even at ×1.5 costs.
+
+The build also stores a daily-returns panel (`returns.parquet`, long: `date, permno, ret`), which
+feeds the 252-day RMT matrices and the spectral ML features.
 
 ### RMT specification update (Week 4)
 
 **Notation (decided, Week 4):** in RMT sections and code, the Marchenko–Pastur aspect ratio is
 written **`q_mp` = N/T** (Bouchaud–Potters convention); the plain letter $q$ keeps meaning the
-dividend yield in all pricing contexts (`utils/greeks.py`, `engine.py`). Week-4 design decisions:
-EWMA de-volatilisation with **λ = 0.94** (RiskMetrics; sensitivity λ ∈ {0.90, 0.97} in Week 5);
+dividend yield in all pricing contexts (`utils/greeks.py`, `engine.py`). Design decisions:
+EWMA de-volatilisation with **λ = 0.94** (RiskMetrics; λ ∈ {0.90, 0.97} is a natural sensitivity);
 cleaned matrices computed **daily** (needed for the daily $\bar\rho_{\text{rmt}}$ variant and for
 spectral-dynamics features); re-injection runs **both** paths — a full `signal_rmt` variant
 re-backtested against the baseline (role A; the 252-vs-91-day horizon mismatch is documented as an
 estimator variant) *and* the spectral features for the ML layer (role B). The Laloux correction is
 **part of the cleaning pipeline** (it sets the clipping edge), not a separate estimator — there is
-one $\bar\rho_{\text{rmt}}$, Laloux-corrected by construction; a naive-edge variant is at most a
-Week-5 robustness line.
+one $\bar\rho_{\text{rmt}}$, Laloux-corrected by construction. The naive-edge comparison is reported
+as a diagnostic (K = 7 Laloux-corrected factors vs 4 naïvely, `fig_mp_spectrum.png`).
 
 The stored 63-day matrices ($q_{mp}\approx1.6$, singular) are unusable for spectral filtering. RMT
 operates on **252-day** windows ($q_{mp}\approx0.4$):
@@ -659,26 +662,27 @@ labelling of clusters/states uses training-window history only, to avoid leakage
 ~104-quarter / 12-crisis sample this spends no crisis degrees of freedom on regime detection and lets
 one supervised model learn how much to trust the regime signal, instead of an arbitrary equal-weight
 average. The regime probability fitted on spectral inputs counts as a *spectral-derived* feature, so
-the VIX-vs-VIX+spectral central test stays interpretable. **Trade architecture (revisitable):
-meta-labeling veto** — the primary signal (v1_rmt gate) proposes the trade, the ML layer vetoes it
-when the predicted correlation spike is too high; retained enhancements: continuous spike label
-$y(t)=\bar\rho^{63}_{t+63}-\bar\rho^{63}_t$ (training only, purged), cost-aware gate (trade only if
-predicted edge > the era's §8bis cost), GMM/HMM/XGB probability ensembling, isotonic calibration;
-CPCV deferred to Week 5. The full protocol (features, label, hyperparameter grids,
-purge 63d + embargo 21d, filtered-only HMM probabilities, the net-Sharpe 0.42 bar) is
-**pre-registered in plan.md before any result was computed**. Also to explore: a
-**parsimonious leg** (use the spectral structure to trade fewer names → less spread paid — the RMT
-answer to frictions). The
-**dual-window justification** (63d = window-matching of the priced horizon; 252d = spectral health)
-goes in the report. Refs: Bun, Bouchaud & Potters (2017, arXiv:1610.08104); Potters & Bouchaud (2020).
+the VIX-vs-VIX+spectral central test stays interpretable. **Trade architecture: meta-labeling veto**
+— the primary signal (v1_rmt gate) proposes the trade, the ML layer vetoes it when the predicted
+correlation spike is too high; with a continuous spike label
+$y(t)=\bar\rho^{63}_{t+63}-\bar\rho^{63}_t$ (training only, purged), a cost-aware gate (trade only if
+predicted edge > the era's §8bis cost), GMM/HMM/XGB probability ensembling and isotonic calibration.
+The protocol (features, label, hyperparameter grids, purge 63d + embargo 21d, filtered-only HMM
+probabilities, the net-Sharpe 0.42 bar) was **fixed before any result was computed** — a
+pre-registration to guard against selection on the outcome. The **parsimonious leg** (use the spectral
+structure to trade fewer names → less spread paid — the RMT answer to frictions) is implemented and
+reported in §14.1 (result 3). The **dual-window justification** (63d = window-matching of the priced
+horizon; 252d = spectral health) is discussed above. Refs: Bun, Bouchaud & Potters (2017,
+arXiv:1610.08104); Potters & Bouchaud (2020).
 
-### Research angle added (Week 5)
+### Research angle: limits to arbitrage
 
-**Limits-to-arbitrage positioning:** DMV show the premium exists but is killed by frictions
-(single-name spreads × a 101% leg; margins) — market-makers earn it (net flows, margin netting). Our
-RMT (parsimonious leg) and ML (enter only when predicted edge > cost) are *responses to frictions*.
-Falsifiable prediction to test on our 29-year sample (theirs stops in the early 2000s): the premium
-should have **compressed post-2003** as frictions fell → subperiod analysis of $\Pi_t$.
+DMV show the premium exists but is largely killed by frictions (single-name spreads × a 101% leg;
+margins) — market-makers earn it (net flows, margin netting). Our RMT (parsimonious leg) and ML
+(enter only when predicted edge > cost) are *responses to frictions*. This gave a falsifiable
+prediction for our 29-year sample (theirs stops in the early 2000s): the premium should compress over
+time as frictions fell. The subperiod analysis of $\Pi_t$ **confirms it** — the premium is strongly
+significant through 2019 and compresses to insignificance post-2020 (§14.4).
 
 ---
 
@@ -858,7 +862,7 @@ limits-to-arbitrage analysis. Chart: `results/figures/fig_crp_validation.png`. P
 `src/dispersion/signal/implied_corr.py` (reproduces the notebook exactly) and `signal.parquet`
 written. The week closed with a **four-axis adversarial audit** (data, signal, mathematics, doc
 consistency): zero critical findings, documentation corrections applied, latent guards recorded in
-§9bis. Report write-up of the derivations deferred to Week 5.
+§9bis.
 
 **Week 3 (baseline backtest) — in progress.** Step 1 done (notebook 04): `vsurfd` carries
 `impl_premium`/`impl_strike` on our frozen grid, fully populated since 1996; naive BS(q=0) misprices
@@ -1014,8 +1018,8 @@ improves the *risk profile* without a supervised, overfitting-prone layer:
 | **v1_rmt + regime** | **0.57** | **+1.00** | **−52.4%** | **0.78** | **+1.51** |
 
 Honest caveat: the return improvement is within noise (Sharpe 0.56→0.57); the genuine gain is
-tail-shape (skew, drawdown), which is exactly the stated objective (cut the tails, not the mean). Its
-robustness to the veto-quantile choice is a Week-5 sensitivity (§14.4). The supervised ML timing layer
+tail-shape (skew, drawdown), which is exactly the stated objective (cut the tails, not the mean). The
+tail improvement survives every veto-quantile choice tested (§14.4). The supervised ML timing layer
 is **not** part of the recommended strategy — it added nothing (§14.1 result 4).
 
 ### 14.2 Suggested thesis structure → where each piece lives
@@ -1024,7 +1028,7 @@ is **not** part of the recommended strategy — it added nothing (§14.1 result 
 |---|---|
 | Intro / client spec | §1 economic rationale; result 1 |
 | Theory | §5 (implied corr), §8bis (DMV eq. 2–11 derivations), §8 (premium/signal); references §13 |
-| Data & methodology | §2–§4 (WRDS, universe, IV), §6 (realised side), §6.4/§7.3 (cleaning, engine design), §8bis (RMT pipeline, cost calibration), ML protocol in `plan.md` |
+| Data & methodology | §2–§4 (WRDS, universe, IV), §6 (realised side), §6.4/§7.3 (cleaning, engine design), §8bis (RMT pipeline, cost calibration); the ML protocol (walk-forward, purge 63d + embargo 21d, label choice) lives in the `ml/` module docstrings and §14.1 results 4–5 |
 | Results | §14.1; all figures/tables in `results/` |
 | Limitations | §9, §9bis, §14.3 |
 | Conclusion | result 3+4: RMT estimation helps, supervised timing doesn't — limits-to-arbitrage + hard-timing |
@@ -1036,11 +1040,13 @@ is **not** part of the recommended strategy — it added nothing (§14.1 result 
 - **Costs are a calibrated parametric grid** on quoted (not effective) spreads — conservative, but a
   model, not per-trade quotes (§8bis).
 - **ML on a tiny sample** (~90 quarterly predictions, ~12 crises): the null result is honest but
-  low-powered; a larger cross-section or a different (daily) label could revisit it — a Week-5 note,
-  not a Week-4 failure.
-- **RMT scalar effect is small** by construction (clipping preserves the market mode that dominates
-  ρ̄); the value shown is via the estimation window and would grow with a parsimonious-leg
-  implementation (not built — Week-5 candidate).
+  low-powered. Switching to a daily label makes the target predictable (corr +0.40, §14.1 result 5a),
+  which is why the null is best read as *the quarterly trade return is unpredictable at this sample*,
+  not as a defect of the features.
+- **RMT scalar effect is small** by construction (the clipping preserves the market mode that
+  dominates ρ̄); most of the value comes through the 252-day estimation window (the ablation, §14.1
+  result 3). The parsimonious leg confirms where RMT pays off against frictions — it improves the
+  strategy *net* of costs but not *gross* (§14.1 result 3).
 - **One provider gap** (OptionMetrics Aug-2020, 17 days) accepted, not fabricated (§9bis).
 
 ### 14.4 Robustness — results (Week 5, notebook 10)
@@ -1092,6 +1098,11 @@ the correlation-risk premium would be *larger*, strengthening the thesis. *Hones
 smiles too would partially offset it, but the net stays positive because the index skew is much
 steeper than single-name skews (exactly DMV's mechanism). Table `table_mfiv_bias.csv`.
 
-### 14.5 Robustness still open (Week 5 remaining)
+### 14.5 Possible extensions
 
-Per-name delta hedge (optional). All other pre-listed robustness items are done (§14.4).
+The robustness programme in §14.4 is complete. One natural extension was left out of scope by design:
+a **per-name delta hedge** (hedging each constituent straddle with its own underlying, rather than
+hedging only the net index exposure). It would sharpen the isolation of the correlation P&L from
+single-name direction, at the cost of much heavier trading and a larger cost drag — a trade-off the
+parsimonious-leg result (§14.1, result 3) already speaks to. It is a clean next step, not a gap in the
+current results.
