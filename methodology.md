@@ -785,7 +785,6 @@ src/dispersion/
 tests/         pytest suite (test_greeks.py)
 exploration_notebooks/   01_explore_vsurfd, 02_explore_crsp, 03_implied_correlation,
                          04_explore_premiums, 05_explore_costs, 06_backtest_results
-config/        reserved (parameters currently live as module function defaults)
 data/          raw + processed (git-ignored)
 results/       figures/ + tables/ (generated; figures/fig_crp_validation.png)
 ```

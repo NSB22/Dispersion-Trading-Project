@@ -39,6 +39,10 @@ dev = [
     "pytest>=9.1.1",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["src"]          # makes `uv run pytest` work without the .env PYTHONPATH
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
