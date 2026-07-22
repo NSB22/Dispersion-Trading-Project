@@ -1,44 +1,36 @@
 [project]
 name = "dispersion-trading"
-version = "0.1.0"
-description = "ML-Driven Dispersion Trading Strategy — Imperial College Applied Project"
+version = "1.0.0"
+description = "ML-Driven Dispersion Trading on the S&P 500 — Imperial College Applied Project"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     # --- Data access ---
     "wrds>=3.3.0",
-    "pyarrow>=16.0.0",        # pour les .parquet
+    "pyarrow>=16.0.0",        # parquet IO
     # --- Core scientific stack ---
     "numpy>=1.26",
     "pandas>=2.2",
     "scipy>=1.13",
-    # --- Stats & ML (baseline + RMT) ---
+    # --- Stats & ML ---
     "scikit-learn>=1.5",
     "statsmodels>=0.14",
+    "xgboost>=3.3.0",
+    "hmmlearn>=0.3.3",
     # --- Viz ---
     "matplotlib>=3.9",
-    "seaborn>=0.13",
     # --- Notebooks ---
     "jupyterlab>=4.2",
     "ipykernel>=6.29",
     # --- Utils ---
-    "python-dotenv>=1.0",     # pour gérer les credentials WRDS proprement
-    "tqdm>=4.66",             # barres de progression
-    "six>=1.17.0",
-    "xgboost>=3.3.0",
-    "hmmlearn>=0.3.3",
+    "python-dotenv>=1.0",     # WRDS credentials via .env
+    "six>=1.17.0",            # required at import time by wrds
 ]
 
-# NB : pas de [build-system] volontairement. Le projet vit sous ~/Desktop (TCC macOS),
-# où l'editable-install uv (.pth) est cassé par le xattr com.apple.provenance lu au
-# démarrage par site/io.open_code. `dispersion` est rendu importable via PYTHONPATH (.env).
+# NB: no [build-system] on purpose. The project lives under ~/Desktop where macOS TCC
+# breaks uv's editable install (.pth files hit the com.apple.provenance xattr read by
+# site/io.open_code at startup). `dispersion` is made importable via PYTHONPATH (.env).
 [tool.uv]
 package = false
-
-[project.optional-dependencies]
-ml = [
-    "xgboost>=2.1",
-    "torch>=2.3",             # pour LSTM (phase 5, optionnelle)
-]
 
 [dependency-groups]
 dev = [
