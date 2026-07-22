@@ -1,4 +1,4 @@
-# Environnements
+# Environments
 .venv/
 __pycache__/
 *.py[cod]
@@ -15,13 +15,13 @@ __pycache__/
 # not with the codebase
 appendix.tex
 
-# Données (sous licence WRDS — JAMAIS sur git)
+# Data (under WRDS license — NEVER on git)
 data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
-# Résultats générés (figures + tables) : trackés sur git — livrables du rapport
+# Generated results (figures + tables): tracked on git — report deliverables
 
 # OS / IDE
 .DS_Store
